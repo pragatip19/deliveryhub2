@@ -113,6 +113,9 @@ export async function getProject(projectId) {
   return { ...data, category_name: data.categories?.name, dm_name: data.profiles?.full_name };
 }
 
+// Alias for getProject
+export const getProjectById = getProject;
+
 export async function createProject(project) {
   const { data, error } = await supabase.from('projects').insert(project).select().single();
   if (error) throw error;
