@@ -345,16 +345,6 @@ export const CLEEN_TASKS = [
   { milestone: 'Publish Go-Live Report', activities: 'Publish Press Release', tools: 'Press-release Playbook', owner: 'Leucine Delivery Manager', status: 'Not Started', duration: 1, dependency: 'Publish Go-Live case study' },
 ];
 
-/**
- * Get the right template based on application/category name
- */
-export function getTemplateForCategory(categoryName) {
-  if (categoryName === 'CLEEN') {
-    return { milestones: CLEEN_MILESTONES, tasks: CLEEN_TASKS };
-  }
-  // MES, Logbooks, DMS, AI Investigator, LMS, AI Agents → MES template
-  return { milestones: MES_MILESTONES, tasks: MES_TASKS };
-}
 
 // ============================================================
 // PROJECT PLAN COLUMNS
