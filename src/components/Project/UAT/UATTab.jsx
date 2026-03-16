@@ -4,7 +4,6 @@ import toast from 'react-hot-toast';
 import { getUATItems, upsertUATItem, deleteUATItem, getPeople } from '../../../lib/supabase';
 import { MES_UAT_TEMPLATE, LOGBOOKS_UAT_TEMPLATE, UAT_STATUS_OPTIONS, UAT_BATCH_STATUS_OPTIONS } from '../../../lib/templates';
 import { useAuth } from '../../../contexts/AuthContext';
-import DataTable from '../../Common/DataTable';
 
 const STATUS_COLORS = {
   'Not Started': 'bg-gray-100 text-gray-800',
