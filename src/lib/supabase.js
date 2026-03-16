@@ -77,7 +77,7 @@ export async function getProjects(userId, role) {
   let query = supabase.from('projects').select(`
     *,
     categories ( name ),
-    profiles!projects_dm_id_fkey ( full_name, email )
+    profiles!dm_id ( full_name, email )
   `).order('created_at', { ascending: false });
 
   const { data, error } = await query;
@@ -92,7 +92,7 @@ export async function getProjects(userId, role) {
 export async function getMyProjects(userId) {
   const { data, error } = await supabase
     .from('projects')
-    .select(`*, categories(name), profiles!projects_dm_id_fkey(full_name, email)`)
+    .select(`*, categories(name), profiles!dm_id(full_name, email)`)
     .eq('dm_id', userId)
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -106,7 +106,7 @@ export async function getMyProjects(userId) {
 export async function getProject(projectId) {
   const { data, error } = await supabase
     .from('projects')
-    .select(`*, categories(name), profiles!projects_dm_id_fkey(full_name, email)`)
+    .select(`*, categories(name), profiles!dm_id(full_name, email)`)
     .eq('id', projectId)
     .single();
   if (error) throw error;
@@ -320,7 +320,7 @@ export async function bulkUpsertPayments(payments) {
 export async function getAllPayments() {
   const { data, error } = await supabase
     .from('payments')
-    .select(`*, projects(name, category_id, dm_id, planned_go_live, profiles!projects_dm_id_fkey(full_name), categories(name))`)
+    .select(`*, projects(name, category_id, dm_id, planned_go_live, profiles!dm_id(full_name), categories(name))`)
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(p => ({
