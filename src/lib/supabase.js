@@ -73,10 +73,17 @@ export async function getCategories() {
 // ============================================================
 // PROJECTS
 // ============================================================
-async function enrichProjectsWithDM(projects) {
+async function enrichProjects(projects) {
   if (!projects || projects.length === 0) return [];
+
+  // Fetch categories
+  const { data: cats } = await supabase.from('categories').select('id, name');
+  const catMap = {};
+  (cats || []).forEach(c => { catMap[c.id] = c.name; });
+
+  // Fetch DM profiles
   const dmIds = [...new Set(projects.map(p => p.dm_id).filter(Boolean))];
-  let profileMap = {};
+  const profileMap = {};
   if (dmIds.length > 0) {
     const { data: profiles } = await supabase
       .from('profiles')
@@ -84,9 +91,10 @@ async function enrichProjectsWithDM(projects) {
       .in('id', dmIds);
     (profiles || []).forEach(pr => { profileMap[pr.id] = pr; });
   }
+
   return projects.map(p => ({
     ...p,
-    category_name: p.categories?.name || '',
+    category_name: catMap[p.category_id] || '',
     dm_name: profileMap[p.dm_id]?.full_name || '',
     dm_email: profileMap[p.dm_id]?.email || '',
   }));
@@ -95,30 +103,30 @@ async function enrichProjectsWithDM(projects) {
 export async function getProjects(userId, role) {
   const { data, error } = await supabase
     .from('projects')
-    .select('*, categories(name)')
+    .select('*')
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return enrichProjectsWithDM(data || []);
+  return enrichProjects(data || []);
 }
 
 export async function getMyProjects(userId) {
   const { data, error } = await supabase
     .from('projects')
-    .select('*, categories(name)')
+    .select('*')
     .eq('dm_id', userId)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return enrichProjectsWithDM(data || []);
+  return enrichProjects(data || []);
 }
 
 export async function getProject(projectId) {
   const { data, error } = await supabase
     .from('projects')
-    .select('*, categories(name)')
+    .select('*')
     .eq('id', projectId)
     .single();
   if (error) throw error;
-  const enriched = await enrichProjectsWithDM([data]);
+  const enriched = await enrichProjects([data]);
   return enriched[0];
 }
 
@@ -329,17 +337,42 @@ export async function bulkUpsertPayments(payments) {
 export async function getAllPayments() {
   const { data, error } = await supabase
     .from('payments')
-    .select(`*, projects(name, category_id, dm_id, planned_go_live, categories(name))`)
+    .select('*')
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data || []).map(p => ({
-    ...p,
-    project_name: p.projects?.name || '',
-    category_name: p.projects?.categories?.name || '',
-    dm_name: p.projects?.profiles?.full_name || '',
-    go_live_date: p.projects?.planned_go_live,
-    project_link: `/project/${p.project_id}`,
-  }));
+  const payments = data || [];
+  if (!payments.length) return [];
+
+  // Fetch projects
+  const projectIds = [...new Set(payments.map(p => p.project_id).filter(Boolean))];
+  const { data: projects } = await supabase.from('projects').select('*').in('id', projectIds);
+  const projectMap = {};
+  (projects || []).forEach(pr => { projectMap[pr.id] = pr; });
+
+  // Fetch categories
+  const { data: cats } = await supabase.from('categories').select('id, name');
+  const catMap = {};
+  (cats || []).forEach(c => { catMap[c.id] = c.name; });
+
+  // Fetch DM profiles
+  const dmIds = [...new Set((projects || []).map(p => p.dm_id).filter(Boolean))];
+  const profileMap = {};
+  if (dmIds.length > 0) {
+    const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', dmIds);
+    (profiles || []).forEach(pr => { profileMap[pr.id] = pr; });
+  }
+
+  return payments.map(p => {
+    const proj = projectMap[p.project_id] || {};
+    return {
+      ...p,
+      project_name: proj.name || '',
+      category_name: catMap[proj.category_id] || '',
+      dm_name: profileMap[proj.dm_id]?.full_name || '',
+      go_live_date: proj.planned_go_live,
+      project_link: `/project/${p.project_id}`,
+    };
+  });
 }
 
 // ============================================================
