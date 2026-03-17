@@ -73,44 +73,53 @@ export async function getCategories() {
 // ============================================================
 // PROJECTS
 // ============================================================
-export async function getProjects(userId, role) {
-  let query = supabase.from('projects').select(`
-    *,
-    categories ( name ),
-    profiles!dm_id ( full_name, email )
-  `).order('created_at', { ascending: false });
-
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data || []).map(p => ({
+async function enrichProjectsWithDM(projects) {
+  if (!projects || projects.length === 0) return [];
+  const dmIds = [...new Set(projects.map(p => p.dm_id).filter(Boolean))];
+  let profileMap = {};
+  if (dmIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, email')
+      .in('id', dmIds);
+    (profiles || []).forEach(pr => { profileMap[pr.id] = pr; });
+  }
+  return projects.map(p => ({
     ...p,
     category_name: p.categories?.name || '',
-    dm_name: p.profiles?.full_name || '',
+    dm_name: profileMap[p.dm_id]?.full_name || '',
+    dm_email: profileMap[p.dm_id]?.email || '',
   }));
+}
+
+export async function getProjects(userId, role) {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*, categories(name)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return enrichProjectsWithDM(data || []);
 }
 
 export async function getMyProjects(userId) {
   const { data, error } = await supabase
     .from('projects')
-    .select(`*, categories(name), profiles!dm_id(full_name, email)`)
+    .select('*, categories(name)')
     .eq('dm_id', userId)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data || []).map(p => ({
-    ...p,
-    category_name: p.categories?.name || '',
-    dm_name: p.profiles?.full_name || '',
-  }));
+  return enrichProjectsWithDM(data || []);
 }
 
 export async function getProject(projectId) {
   const { data, error } = await supabase
     .from('projects')
-    .select(`*, categories(name), profiles!dm_id(full_name, email)`)
+    .select('*, categories(name)')
     .eq('id', projectId)
     .single();
   if (error) throw error;
-  return { ...data, category_name: data.categories?.name, dm_name: data.profiles?.full_name };
+  const enriched = await enrichProjectsWithDM([data]);
+  return enriched[0];
 }
 
 // Alias for getProject
@@ -320,7 +329,7 @@ export async function bulkUpsertPayments(payments) {
 export async function getAllPayments() {
   const { data, error } = await supabase
     .from('payments')
-    .select(`*, projects(name, category_id, dm_id, planned_go_live, profiles!dm_id(full_name), categories(name))`)
+    .select(`*, projects(name, category_id, dm_id, planned_go_live, categories(name))`)
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(p => ({
