@@ -104,7 +104,8 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
       const template = getTemplateForCategory(categoryName);
       if (template) {
         const milestonesToInsert = (template.milestones || []).map((m) => ({
-          ...m,
+          name: typeof m === 'string' ? m : m.name,
+          status: (typeof m === 'object' && m.status) ? m.status : 'Not Started',
           project_id: projectId,
           planned_start: null,
           planned_end: null,
