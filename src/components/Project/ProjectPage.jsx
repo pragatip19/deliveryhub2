@@ -29,7 +29,7 @@ const TABS = [
 ];
 
 export default function ProjectPage() {
-  const { projectId, tab } = useParams();
+  const { id: projectId, tab } = useParams();
   const navigate = useNavigate();
   const { user, canEditProject } = useAuth();
   const [project, setProject] = useState(null);
