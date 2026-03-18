@@ -143,7 +143,13 @@ export default function ProjectPage() {
           <Route path="uat" element={<UATTab project={project} canEdit={canEdit} />} />
           <Route
             path="raid"
-            element={<RaidTable project={project} canEdit={canEdit} type="raid" />}
+            element={
+              <div className="space-y-6">
+                {['risk', 'assumption', 'issue', 'dependency'].map(type => (
+                  <RaidTable key={type} project={project} canEdit={canEdit} type={type} />
+                ))}
+              </div>
+            }
           />
           <Route
             path="feedback"

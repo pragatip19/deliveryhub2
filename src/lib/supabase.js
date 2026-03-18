@@ -184,7 +184,15 @@ export async function getMilestones(projectId) {
   return data || [];
 }
 
-export async function upsertMilestone(milestone) {
+// Accepts both: upsertMilestone(obj) or upsertMilestone(projectId, id, updates)
+export async function upsertMilestone(projectIdOrObj, id, updates) {
+  let milestone;
+  if (typeof projectIdOrObj === 'object' && projectIdOrObj !== null) {
+    milestone = projectIdOrObj;
+  } else {
+    milestone = { project_id: projectIdOrObj, ...updates };
+    if (id) milestone.id = id;
+  }
   const { data, error } = await supabase.from('milestones').upsert(milestone).select().single();
   if (error) throw error;
   return data;
@@ -267,7 +275,15 @@ export async function getSOWItems(projectId) {
   return data || [];
 }
 
-export async function upsertSOWItem(item) {
+// Accepts both: upsertSOWItem(obj) or upsertSOWItem(projectId, itemId, updates)
+export async function upsertSOWItem(projectIdOrObj, itemId, updates) {
+  let item;
+  if (typeof projectIdOrObj === 'object' && projectIdOrObj !== null) {
+    item = projectIdOrObj;
+  } else {
+    item = { project_id: projectIdOrObj, ...updates };
+    if (itemId && !String(itemId).startsWith('temp-')) item.id = itemId;
+  }
   const { data, error } = await supabase.from('sow_items').upsert(item).select().single();
   if (error) throw error;
   return data;
@@ -294,7 +310,14 @@ export async function getSOWDropdownOptions(projectId) {
   return data || [];
 }
 
-export async function upsertSOWDropdownOption(option) {
+// Accepts both: upsertSOWDropdownOption(obj) or upsertSOWDropdownOption(projectId, section, value)
+export async function upsertSOWDropdownOption(projectIdOrObj, section, value) {
+  let option;
+  if (typeof projectIdOrObj === 'object' && projectIdOrObj !== null) {
+    option = projectIdOrObj;
+  } else {
+    option = { project_id: projectIdOrObj, section, work_item: value };
+  }
   const { data, error } = await supabase.from('sow_dropdown_options').upsert(option, {
     onConflict: 'project_id,section,work_item'
   }).select().single();
@@ -315,7 +338,14 @@ export async function getPayments(projectId) {
   return data || [];
 }
 
-export async function upsertPayment(payment) {
+// Accepts both: upsertPayment(obj) or upsertPayment(projectId, item)
+export async function upsertPayment(projectIdOrObj, item) {
+  let payment;
+  if (typeof projectIdOrObj === 'object' && projectIdOrObj !== null) {
+    payment = projectIdOrObj;
+  } else {
+    payment = { ...item, project_id: projectIdOrObj };
+  }
   const { data, error } = await supabase.from('payments').upsert(payment).select().single();
   if (error) throw error;
   return data;
@@ -408,8 +438,15 @@ export async function getUATItems(projectId) {
   return data || [];
 }
 
-export async function upsertUATItem(item) {
-  const { data, error } = await supabase.from('uat_items').upsert(item).select().single();
+// Accepts both: upsertUATItem(obj) or upsertUATItem(projectId, item)
+export async function upsertUATItem(projectIdOrObj, item) {
+  let uatItem;
+  if (typeof projectIdOrObj === 'object' && projectIdOrObj !== null) {
+    uatItem = projectIdOrObj;
+  } else {
+    uatItem = { ...item, project_id: projectIdOrObj };
+  }
+  const { data, error } = await supabase.from('uat_items').upsert(uatItem).select().single();
   if (error) throw error;
   return data;
 }
@@ -450,8 +487,15 @@ export async function getFeedbackItems(projectId) {
   return data || [];
 }
 
-export async function upsertFeedbackItem(item) {
-  const { data, error } = await supabase.from('feedback_items').upsert(item).select().single();
+// Accepts both: upsertFeedbackItem(obj) or upsertFeedbackItem(projectId, item)
+export async function upsertFeedbackItem(projectIdOrObj, item) {
+  let feedbackItem;
+  if (typeof projectIdOrObj === 'object' && projectIdOrObj !== null) {
+    feedbackItem = projectIdOrObj;
+  } else {
+    feedbackItem = { ...item, project_id: projectIdOrObj };
+  }
+  const { data, error } = await supabase.from('feedback_items').upsert(feedbackItem).select().single();
   if (error) throw error;
   return data;
 }
