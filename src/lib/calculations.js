@@ -230,20 +230,25 @@ function getWorkingDaysList(startDate, endDate) {
  *
  * WEIGHTING LOGIC
  * ───────────────
- * Project timeline = min(planned_start) → max(planned_end) in working days.
- * Every working day carries equal weight: 1 / total_project_working_days.
+ * Denominator = targetDays (projected onboarding days: 72 / 60 / 36).
+ * Every working day carries equal weight: 1 / targetDays.
  * On a day with N parallel active tasks, each task earns:
- *   1 / (total_project_working_days × N)
+ *   1 / (targetDays × N)
  * A task's total weight = sum of its daily earnings across all its active days.
- * All task weights sum to ≤ 100 % (exactly 100 % when the plan has no gaps).
  *
  * CURRENT %   = sum of weights of tasks where status = "Done"
+ *               (can exceed targetDays' share if tasks overlap heavily)
  * EXPECTED %  = elapsed working days from project start to today
- *               ÷ total project working days   (pure time, capped at 100 %)
+ *               ÷ targetDays  (pure time, capped at 100 %)
+ *
+ * @param {Array}  tasks       - task objects with planned_start, planned_end, status
+ * @param {number} targetDays  - projected onboarding days (72 / 60 / 36); falls back
+ *                               to actual task span if omitted
+ * @param {Date}   [todayOverride] - optional override for "today" (useful for testing)
  *
  * EXCLUSIONS: tasks missing dates, planned_start > planned_end, status = "Not Applicable"
  */
-export function calcSOWCompletion(tasks, todayOverride) {
+export function calcSOWCompletion(tasks, targetDays, todayOverride) {
   const todayDate = todayOverride || today();
 
   // 1. Filter eligible tasks
@@ -257,53 +262,54 @@ export function calcSOWCompletion(tasks, todayOverride) {
 
   if (eligible.length === 0) return { current: 0, expected: 0, delta: 0, isBehind: false };
 
-  // 2. Project timeline boundaries
+  // 2. Project timeline boundaries (from actual task dates)
   const projectStart = new Date(Math.min(...eligible.map(t => parseDate(t.planned_start).getTime())));
   const projectEnd   = new Date(Math.max(...eligible.map(t => parseDate(t.planned_end).getTime())));
   projectStart.setHours(0, 0, 0, 0);
   projectEnd.setHours(0, 0, 0, 0);
 
-  // 3. All working days in the project timeline
-  const projectDays = getWorkingDaysList(projectStart, projectEnd);
-  const totalDays   = projectDays.length;
+  // 3. Denominator: use targetDays (72/60/36) if provided, else derive from task span
+  const actualSpanDays = getWorkingDaysList(projectStart, projectEnd).length;
+  const totalDays      = targetDays || actualSpanDays;
   if (totalDays === 0) return { current: 0, expected: 0, delta: 0, isBehind: false };
 
-  // 4. Pre-stamp each task's start/end as timestamps for fast comparison
+  // 4. Enumerate every working day tasks actually cover (for parallelism analysis)
+  const projectDays = getWorkingDaysList(projectStart, projectEnd);
+
+  // 5. Pre-stamp each task's start/end as timestamps for fast comparison
   const stamped = eligible.map(t => ({
     ...t,
     _s: parseDate(t.planned_start).setHours(0, 0, 0, 0),
     _e: parseDate(t.planned_end).setHours(0, 0, 0, 0),
   }));
 
-  // 5. Accumulate per-task weights across every project working day
+  // 6. Accumulate per-task weights — each day's share divided by active task count
   const weights = {};
   eligible.forEach(t => { weights[t.id] = 0; });
 
   for (const day of projectDays) {
     const ts = day.getTime();
     const active = stamped.filter(t => ts >= t._s && ts <= t._e);
-    if (active.length === 0) continue;                        // gap day — skip
-    const share = 1 / (totalDays * active.length);
+    if (active.length === 0) continue;                         // gap day — skip
+    const share = 1 / (totalDays * active.length);            // uses targetDays as denominator
     active.forEach(t => { weights[t.id] += share; });
   }
 
-  // 6. Current % = sum of weights for all "Done" tasks
+  // 7. Current % = sum of weights for all "Done" tasks
   const currentFrac = eligible
     .filter(t => t.status === 'Done')
     .reduce((sum, t) => sum + weights[t.id], 0);
 
-  // 7. Expected % = elapsed working days / total project working days (time only)
+  // 8. Expected % = elapsed working days since project start / targetDays (time only)
   const todayNorm = new Date(todayDate);
   todayNorm.setHours(0, 0, 0, 0);
 
   let expectedFrac;
   if (todayNorm < projectStart) {
     expectedFrac = 0;                                          // before project start
-  } else if (todayNorm >= projectEnd) {
-    expectedFrac = 1;                                          // after project end
   } else {
     const elapsed = networkdays(projectStart, todayNorm);
-    expectedFrac  = elapsed / totalDays;
+    expectedFrac  = elapsed / totalDays;                       // can exceed 1 if overdue
   }
 
   const current  = Math.min(100, currentFrac  * 100);
@@ -315,7 +321,7 @@ export function calcSOWCompletion(tasks, todayOverride) {
     expected:    Math.round(expected * 10) / 10,
     delta:       Math.round(delta    * 10) / 10,
     isBehind:    delta < -5,
-    taskWeights: weights,   // exposed for debugging / future per-task views
+    taskWeights: weights,    // exposed for debugging / future per-task views
   };
 }
 
