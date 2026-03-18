@@ -365,11 +365,12 @@ const ProjectPlan = ({ project, canEdit }) => {
         status:     'Not Started',
         sort_order: tasks.length + i,
       }));
-      const saved = await bulkUpsertPlanTasks(toInsert);
-      const updated = [...tasks, ...saved];
-      setTasks(updated);
-      pushHistory(updated);
-      toast.success(`${saved.length} tasks loaded from template`);
+      await bulkUpsertPlanTasks(toInsert);
+      // Re-fetch from DB so tasks come back in sort_order (Supabase upsert response order is not guaranteed)
+      const fresh = await getPlanTasks(project.id);
+      setTasks(fresh);
+      pushHistory(fresh);
+      toast.success(`${PLAN_TEMPLATE.length} tasks loaded from template`);
     } catch (e) {
       toast.error('Failed to load template: ' + (e.message || ''));
     }
