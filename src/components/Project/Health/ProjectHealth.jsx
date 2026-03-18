@@ -108,7 +108,7 @@ export default function ProjectHealth({ project, canEdit }) {
     ? Math.max(0, networkdays(parseDate(releaseTask.baseline_planned_end), parseDate(releaseTask.planned_end)) - 1)
     : null;
 
-  const sowCompletion = calcSOWCompletion(tasks);
+  const sowCompletion = calcSOWCompletion(tasks, targetDays);
   const currentSOW = sowCompletion?.current ?? 0;
   const expectedSOW = sowCompletion?.expected ?? 0;
   const delta = currentSOW - expectedSOW;
