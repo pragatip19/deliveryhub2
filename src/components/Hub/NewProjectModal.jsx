@@ -103,14 +103,11 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
       // Load template milestones and tasks
       const template = getTemplateForCategory(categoryName);
       if (template) {
-        const milestonesToInsert = (template.milestones || []).map((m) => ({
+        const milestonesToInsert = (template.milestones || []).map((m, i) => ({
           name: typeof m === 'string' ? m : m.name,
-          status: (typeof m === 'object' && m.status) ? m.status : 'Not Started',
+          status: 'Not Started',
+          sort_order: i,
           project_id: projectId,
-          planned_start: null,
-          planned_end: null,
-          baseline_planned_start: null,
-          baseline_planned_end: null
         }));
         if (milestonesToInsert.length > 0) await bulkUpsertMilestones(milestonesToInsert);
 

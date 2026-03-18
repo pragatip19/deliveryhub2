@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Search, Plus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getProjects, getMyProjects } from '../../lib/supabase';
 import NewProjectModal from './NewProjectModal';
-import StatusBadge from '../shared/StatusBadge';
 import toast from 'react-hot-toast';
 
 const CATEGORIES = [
@@ -24,6 +24,7 @@ const DEAL_STATUS_COLORS = {
 };
 
 export default function HubPage() {
+  const navigate = useNavigate();
   const { user, profile, isAdmin, isDM, isLeadership } = useAuth();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -178,7 +179,7 @@ export default function HubPage() {
             <div
               key={project.id}
               className="bg-white rounded-lg border border-slate-200 p-6 hover:shadow-lg transition-shadow cursor-pointer"
-              onClick={() => window.location.href = `/project/${project.id}`}
+              onClick={() => navigate(`/project/${project.id}`)}
             >
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
@@ -214,7 +215,7 @@ export default function HubPage() {
               </div>
 
               <button
-                onClick={e => { e.stopPropagation(); window.location.href = `/project/${project.id}`; }}
+                onClick={e => { e.stopPropagation(); navigate(`/project/${project.id}`); }}
                 className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
               >
                 View Project
