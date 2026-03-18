@@ -1,18 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   ChevronDown,
+  ChevronUp,
   Eye,
-  EyeOff,
   Download,
   Plus,
   Trash2,
-  Filter,
   ArrowUpDown,
-  Link as LinkIcon,
-  Calendar,
+  MoreVertical,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import debounce from 'lodash.debounce';
+import { useAuth } from '../../../contexts/AuthContext';
 import {
   getPlanTasks,
   bulkUpsertPlanTasks,
@@ -21,13 +22,9 @@ import {
   getMilestones,
   getPeople,
 } from '../../../lib/supabase';
-import {
-  PLAN_COLUMNS,
-  STATUS_OPTIONS,
-} from '../../../lib/templates';
+import { STATUS_OPTIONS } from '../../../lib/templates';
 import {
   recalculatePlan,
-  calculateTask,
   getStatusColor,
 } from '../../../lib/calculations';
 import {
@@ -37,9 +34,12 @@ import {
   parseDate,
   networkdays,
 } from '../../../lib/workdays';
-import StatusBadge from '../../shared/StatusBadge';
 
 const ProjectPlan = ({ project, canEdit }) => {
+  const { isAdmin: isAdminFn } = useAuth();
+  const isProjectAdmin = canEdit && isAdminFn();
+  const isDM = canEdit; // anyone with edit access (admin or DM of this project)
+
   const [tasks, setTasks] = useState([]);
   const [milestones, setMilestones] = useState([]);
   const [people, setPeople] = useState([]);
@@ -50,10 +50,16 @@ const ProjectPlan = ({ project, canEdit }) => {
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [editingCell, setEditingCell] = useState(null);
   const [loading, setLoading] = useState(true);
-  const tableRef = useRef(null);
+  const [openMenuRow, setOpenMenuRow] = useState(null);
+
+  // Undo/redo history
+  const historyRef = useRef([]);
+  const historyIndexRef = useRef(-1);
+  const isUndoRedoRef = useRef(false);
+
   const scrollContainerRef = useRef(null);
 
-  // Define all columns with metadata
+  // Define all columns
   const COLUMNS = [
     { key: 'milestone', label: 'Milestone', width: 180, frozen: true },
     { key: 'activities', label: 'Activities', width: 240, frozen: true },
@@ -76,15 +82,10 @@ const ProjectPlan = ({ project, canEdit }) => {
     { key: 'learnings', label: 'Learnings from Delay', width: 200, frozen: false },
   ];
 
-  const isAdmin = canEdit && project?.role === 'admin';
-  const isDM = canEdit && (project?.role === 'admin' || project?.role === 'dm');
-
   // Initialize visible columns
   useEffect(() => {
     const initialVisible = {};
-    COLUMNS.forEach(col => {
-      initialVisible[col.key] = true;
-    });
+    COLUMNS.forEach(col => { initialVisible[col.key] = true; });
     setVisibleColumns(initialVisible);
   }, []);
 
@@ -99,15 +100,13 @@ const ProjectPlan = ({ project, canEdit }) => {
           getPeople(project.id),
         ]);
 
-        setTasks(tasksData || []);
+        const tasksArr = tasksData || [];
         setMilestones(milestonesData || []);
         setPeople(peopleData || []);
 
-        // Run full recalculation on load
-        if (tasksData && tasksData.length > 0) {
-          const recalculated = recalculatePlan(tasksData);
-          setTasks(recalculated);
-        }
+        const recalculated = tasksArr.length > 0 ? recalculatePlan(tasksArr) : tasksArr;
+        setTasks(recalculated);
+        pushHistory(recalculated);
       } catch (error) {
         console.error('Error loading plan data:', error);
         toast.error('Failed to load project plan');
@@ -115,37 +114,83 @@ const ProjectPlan = ({ project, canEdit }) => {
         setLoading(false);
       }
     };
-
-    loadData();
+    if (project?.id) loadData();
   }, [project?.id]);
 
-  // Debounced save function
+  // History helpers
+  function pushHistory(newTasks) {
+    if (isUndoRedoRef.current) return;
+    const snapshot = JSON.parse(JSON.stringify(newTasks));
+    // Truncate any future states
+    historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+    historyRef.current.push(snapshot);
+    historyIndexRef.current = historyRef.current.length - 1;
+  }
+
+  // Debounced save — correct signature: bulkUpsertPlanTasks(tasks)
   const debouncedSave = useCallback(
-    debounce(async (updates) => {
+    debounce(async (updatedTasks) => {
       try {
-        await bulkUpsertPlanTasks(project.id, updates);
+        const tasksWithProject = updatedTasks.map(t => ({ ...t, project_id: project.id }));
+        await bulkUpsertPlanTasks(tasksWithProject);
         toast.success('Changes saved');
       } catch (error) {
         console.error('Save error:', error);
-        toast.error('Failed to save changes');
+        toast.error('Failed to save: ' + (error.message || 'Unknown error'));
       }
     }, 800),
     [project?.id]
   );
 
+  // Undo
+  function undo() {
+    if (historyIndexRef.current <= 0) { toast('Nothing to undo'); return; }
+    historyIndexRef.current--;
+    isUndoRedoRef.current = true;
+    const prev = JSON.parse(JSON.stringify(historyRef.current[historyIndexRef.current]));
+    setTasks(prev);
+    debouncedSave(prev);
+    isUndoRedoRef.current = false;
+  }
+
+  // Redo
+  function redo() {
+    if (historyIndexRef.current >= historyRef.current.length - 1) { toast('Nothing to redo'); return; }
+    historyIndexRef.current++;
+    isUndoRedoRef.current = true;
+    const next = JSON.parse(JSON.stringify(historyRef.current[historyIndexRef.current]));
+    setTasks(next);
+    debouncedSave(next);
+    isUndoRedoRef.current = false;
+  }
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Close three-dots menu on outside click
+  useEffect(() => {
+    const handler = () => setOpenMenuRow(null);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, []);
+
   // Handle cell change
   const handleCellChange = useCallback((rowIndex, columnKey, value) => {
     setTasks(prevTasks => {
       const newTasks = [...prevTasks];
-      const task = newTasks[rowIndex];
-
+      const task = { ...newTasks[rowIndex] };
       if (!task) return prevTasks;
-
-      const oldValue = task[columnKey];
 
       // Parse date values
       if (columnKey.includes('start') || columnKey.includes('end')) {
-        task[columnKey] = parseDate(value);
+        task[columnKey] = value || null;
       } else if (columnKey === 'duration') {
         task[columnKey] = parseInt(value) || 0;
       } else {
@@ -161,7 +206,7 @@ const ProjectPlan = ({ project, canEdit }) => {
         task.status = 'Done';
       }
 
-      // Baseline auto-copy
+      // Baseline auto-copy on first planned_start entry
       if (columnKey === 'planned_start' && !task.baseline_planned_start && value) {
         task.baseline_planned_start = value;
         task.baseline_locked = true;
@@ -169,30 +214,35 @@ const ProjectPlan = ({ project, canEdit }) => {
 
       // Recalculate planned_end
       if (columnKey === 'planned_start' || columnKey === 'duration') {
-        task.planned_end = calcPlannedEnd(task.planned_start, task.duration);
+        if (task.planned_start && task.duration) {
+          task.planned_end = calcPlannedEnd(task.planned_start, task.duration);
+        }
       }
 
-      // Recalculate delay/on track
+      // Recalculate delay
       if (task.planned_end && task.current_end) {
         const delay = networkdays(task.planned_end, task.current_end);
         task.delay_status = delay > 0 ? 'Delay' : 'On Track';
         task.days_delay = Math.max(0, delay);
       }
 
+      newTasks[rowIndex] = task;
+
       // Dependency cascade
-      if (columnKey === 'dependency' || columnKey === 'duration' || columnKey === 'status') {
-        const recalculated = recalculatePlan(newTasks, rowIndex);
-        return recalculated;
+      let finalTasks = newTasks;
+      if (['dependency', 'duration', 'status', 'planned_start'].includes(columnKey)) {
+        finalTasks = recalculatePlan(newTasks);
       }
 
-      debouncedSave([task]);
-      return newTasks;
+      pushHistory(finalTasks);
+      debouncedSave(finalTasks);
+      return finalTasks;
     });
 
     setEditingCell(null);
   }, [debouncedSave]);
 
-  // Handle row add
+  // Add row — correct signature: upsertPlanTask(task)
   const handleAddRow = async () => {
     try {
       const newTask = {
@@ -200,34 +250,36 @@ const ProjectPlan = ({ project, canEdit }) => {
         activities: 'New Activity',
         status: 'Not Started',
         duration: 0,
+        sort_order: tasks.length,
       };
-
-      const created = await upsertPlanTask(project.id, newTask);
-      setTasks([...tasks, created]);
+      const created = await upsertPlanTask(newTask);
+      const updated = [...tasks, created];
+      setTasks(updated);
+      pushHistory(updated);
       toast.success('Row added');
     } catch (error) {
       console.error('Error adding row:', error);
-      toast.error('Failed to add row');
+      toast.error('Failed to add row: ' + (error.message || ''));
     }
   };
 
-  // Handle row delete
+  // Delete row — correct signature: deletePlanTask(id)
   const handleDeleteRow = async (rowIndex) => {
-    if (!isAdmin) {
-      toast.error('Only admins can delete rows');
-      return;
-    }
-
+    if (!isDM) { toast.error('No edit access'); return; }
+    if (!window.confirm('Delete this row?')) return;
     try {
       const task = tasks[rowIndex];
-      if (task.id) {
-        await deletePlanTask(project.id, task.id);
+      if (task.id && !String(task.id).startsWith('temp-')) {
+        await deletePlanTask(task.id);
       }
-      setTasks(tasks.filter((_, i) => i !== rowIndex));
+      const updated = tasks.filter((_, i) => i !== rowIndex);
+      setTasks(updated);
+      pushHistory(updated);
+      setOpenMenuRow(null);
       toast.success('Row deleted');
     } catch (error) {
       console.error('Error deleting row:', error);
-      toast.error('Failed to delete row');
+      toast.error('Failed to delete: ' + (error.message || ''));
     }
   };
 
@@ -236,40 +288,33 @@ const ProjectPlan = ({ project, canEdit }) => {
     e.preventDefault();
     const text = e.clipboardData.getData('text/plain');
     const rows = text.split('\n').filter(row => row.trim());
-
     if (rows.length === 0) return;
 
-    const newTasks = [];
-    rows.forEach(row => {
+    const newTaskObjs = rows.map(row => {
       const values = row.split('\t');
-      const newTask = {
+      return {
         project_id: project.id,
         activities: values[0] || '',
         tools: values[1] || '',
         owner: values[2] || '',
         status: values[3] || 'Not Started',
         duration: parseInt(values[4]) || 0,
+        sort_order: tasks.length,
       };
-      newTasks.push(newTask);
     });
 
-    setTasks([...tasks, ...newTasks]);
-    debouncedSave(newTasks);
-    toast.success(`${newTasks.length} rows pasted`);
+    const updated = [...tasks, ...newTaskObjs];
+    setTasks(updated);
+    pushHistory(updated);
+    debouncedSave(updated);
+    toast.success(`${newTaskObjs.length} rows pasted`);
   };
 
-  // Render cell content
-  const renderCellContent = (task, columnKey, rowIndex) => {
-    const value = task[columnKey];
-    let isReadOnly = false;
-    let isEditable = false;
-
-    // Determine editability
+  // Determine cell editability
+  const getCellEditability = (task, columnKey, rowIndex) => {
     switch (columnKey) {
       case 'milestone':
-        isEditable = isAdmin;
-        isReadOnly = !isAdmin;
-        break;
+        return isProjectAdmin;
       case 'activities':
       case 'tools':
       case 'owner':
@@ -279,39 +324,35 @@ const ProjectPlan = ({ project, canEdit }) => {
       case 'deviation':
       case 'deviation_details':
       case 'learnings':
-        isEditable = isDM;
-        isReadOnly = !isDM;
-        break;
+        return isDM;
       case 'baseline_planned_start':
       case 'baseline_planned_end':
-        isEditable = isAdmin;
-        isReadOnly = !isAdmin;
-        break;
+        return isProjectAdmin;
       case 'planned_start':
-        // Only DM can edit first task, others read-only
-        isEditable = isDM && (rowIndex === 0 || !task.planned_start_locked);
-        isReadOnly = !isEditable;
-        break;
+        // First row always editable by DM; others only if not locked
+        return isDM && (rowIndex === 0 || !task.planned_start_locked);
       case 'actual_start':
       case 'current_end':
-        isEditable = isDM;
-        isReadOnly = !isDM;
-        break;
+        return isDM;
       case 'planned_end':
       case 'delay_status':
       case 'days_delay':
       case 'baseline_delta':
-        isReadOnly = true;
-        break;
       default:
-        isReadOnly = true;
+        return false;
     }
+  };
 
-    // Render based on column type
+  // Render cell content
+  const renderCellContent = (task, columnKey, rowIndex) => {
+    const value = task[columnKey];
+    const isEditable = getCellEditability(task, columnKey, rowIndex);
+
     if (columnKey === 'status') {
+      const colors = getStatusColor(value);
       return (
         <div
-          className={`px-2 py-1 rounded-full text-sm font-medium ${getStatusColor(value)}`}
+          className={`px-2 py-0.5 rounded-full text-xs font-medium inline-block ${colors.bg} ${colors.text} ${isEditable ? 'cursor-pointer' : ''}`}
           onClick={() => isEditable && setEditingCell({ row: rowIndex, col: columnKey })}
         >
           {value || 'Not Started'}
@@ -320,54 +361,49 @@ const ProjectPlan = ({ project, canEdit }) => {
     }
 
     if (columnKey === 'delay_status') {
-      const bgColor = value === 'Delay' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700';
-      return (
-        <div className={`px-2 py-1 rounded text-sm font-medium ${bgColor}`}>
-          {value || '—'}
-        </div>
-      );
+      const bgColor = value === 'Delay' ? 'bg-red-100 text-red-700' : value === 'On Track' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500';
+      return <div className={`px-2 py-0.5 rounded text-xs font-medium ${bgColor}`}>{value || '—'}</div>;
     }
 
     if (columnKey.includes('start') || columnKey.includes('end')) {
       return (
         <div
           onClick={() => isEditable && setEditingCell({ row: rowIndex, col: columnKey })}
-          className={isEditable ? 'cursor-pointer hover:bg-blue-50' : ''}
+          className={`text-xs ${isEditable ? 'cursor-pointer hover:bg-blue-50 rounded px-1' : 'text-gray-500'}`}
         >
-          {value ? formatDate(value) : '—'}
+          {value ? formatDate(value) : <span className="text-gray-300">—</span>}
         </div>
       );
     }
 
-    if (columnKey === 'tools') {
-      if (value && value.startsWith('http')) {
-        return (
-          <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">
-            {value}
-          </a>
-        );
-      }
-      return <div className="truncate">{value || ''}</div>;
+    if (columnKey === 'days_delay') {
+      return <span className={`text-xs font-medium ${value > 0 ? 'text-red-600' : 'text-gray-400'}`}>{value > 0 ? `+${value}d` : '—'}</span>;
+    }
+
+    if (columnKey === 'tools' && value && value.startsWith('http')) {
+      return <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs hover:text-blue-800 truncate block">{value}</a>;
     }
 
     if (columnKey === 'owner') {
+      const person = people.find(p => p.id === value);
       return (
         <div
           onClick={() => isEditable && setEditingCell({ row: rowIndex, col: columnKey })}
-          className={isEditable ? 'cursor-pointer hover:bg-blue-50' : ''}
+          className={`text-xs truncate ${isEditable ? 'cursor-pointer hover:bg-blue-50 rounded px-1' : ''}`}
         >
-          {people.find(p => p.id === value)?.name || value || '—'}
+          {person?.name || value || <span className="text-gray-300">—</span>}
         </div>
       );
     }
 
     if (columnKey === 'milestone') {
+      const ms = milestones.find(m => m.id === value);
       return (
         <div
           onClick={() => isEditable && setEditingCell({ row: rowIndex, col: columnKey })}
-          className={isEditable ? 'cursor-pointer hover:bg-blue-50' : ''}
+          className={`text-xs truncate font-medium ${isEditable ? 'cursor-pointer hover:bg-blue-50 rounded px-1' : ''}`}
         >
-          {milestones.find(m => m.id === value)?.name || value || '—'}
+          {ms?.name || value || <span className="text-gray-300">—</span>}
         </div>
       );
     }
@@ -375,9 +411,9 @@ const ProjectPlan = ({ project, canEdit }) => {
     return (
       <div
         onClick={() => isEditable && setEditingCell({ row: rowIndex, col: columnKey })}
-        className={`truncate ${isEditable ? 'cursor-pointer hover:bg-blue-50' : ''}`}
+        className={`text-xs truncate ${isEditable ? 'cursor-pointer hover:bg-blue-50 rounded px-1' : ''}`}
       >
-        {value || '—'}
+        {value ?? <span className="text-gray-300">—</span>}
       </div>
     );
   };
@@ -391,12 +427,11 @@ const ProjectPlan = ({ project, canEdit }) => {
         <select
           value={value || 'Not Started'}
           onChange={(e) => handleCellChange(rowIndex, columnKey, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded"
+          className="w-full px-1 py-0.5 border border-blue-400 rounded text-xs focus:outline-none"
           autoFocus
+          onBlur={() => setEditingCell(null)}
         >
-          {STATUS_OPTIONS.map(status => (
-            <option key={status} value={status}>{status}</option>
-          ))}
+          {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
       );
     }
@@ -406,13 +441,12 @@ const ProjectPlan = ({ project, canEdit }) => {
         <select
           value={value || ''}
           onChange={(e) => handleCellChange(rowIndex, columnKey, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded"
+          className="w-full px-1 py-0.5 border border-blue-400 rounded text-xs focus:outline-none"
           autoFocus
+          onBlur={() => setEditingCell(null)}
         >
           <option value="">—</option>
-          {people.map(person => (
-            <option key={person.id} value={person.id}>{person.name}</option>
-          ))}
+          {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       );
     }
@@ -422,13 +456,12 @@ const ProjectPlan = ({ project, canEdit }) => {
         <select
           value={value || ''}
           onChange={(e) => handleCellChange(rowIndex, columnKey, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded"
+          className="w-full px-1 py-0.5 border border-blue-400 rounded text-xs focus:outline-none"
           autoFocus
+          onBlur={() => setEditingCell(null)}
         >
           <option value="">—</option>
-          {milestones.map(milestone => (
-            <option key={milestone.id} value={milestone.id}>{milestone.name}</option>
-          ))}
+          {milestones.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
       );
     }
@@ -437,10 +470,11 @@ const ProjectPlan = ({ project, canEdit }) => {
       return (
         <input
           type="date"
-          value={value ? formatDateInput(value) : ''}
+          value={value ? formatDateInput(parseDate(value)) : ''}
           onChange={(e) => handleCellChange(rowIndex, columnKey, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded"
+          className="w-full px-1 py-0.5 border border-blue-400 rounded text-xs focus:outline-none"
           autoFocus
+          onBlur={() => setEditingCell(null)}
         />
       );
     }
@@ -451,8 +485,10 @@ const ProjectPlan = ({ project, canEdit }) => {
           type="number"
           value={value || ''}
           onChange={(e) => handleCellChange(rowIndex, columnKey, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded"
+          className="w-full px-1 py-0.5 border border-blue-400 rounded text-xs focus:outline-none"
           autoFocus
+          onBlur={() => setEditingCell(null)}
+          min={1}
         />
       );
     }
@@ -462,8 +498,9 @@ const ProjectPlan = ({ project, canEdit }) => {
         type="text"
         value={value || ''}
         onChange={(e) => handleCellChange(rowIndex, columnKey, e.target.value)}
-        className="w-full px-2 py-1 border border-gray-300 rounded"
+        className="w-full px-1 py-0.5 border border-blue-400 rounded text-xs focus:outline-none"
         autoFocus
+        onBlur={() => setEditingCell(null)}
       />
     );
   };
@@ -471,44 +508,29 @@ const ProjectPlan = ({ project, canEdit }) => {
   // Filter tasks
   const filteredTasks = useMemo(() => {
     let result = tasks;
-
     Object.entries(filterConfig).forEach(([key, filterValue]) => {
       if (!filterValue) return;
-      result = result.filter(task => {
-        const taskValue = String(task[key]).toLowerCase();
-        return taskValue.includes(filterValue.toLowerCase());
-      });
+      result = result.filter(task => String(task[key] || '').toLowerCase().includes(filterValue.toLowerCase()));
     });
-
     return result;
   }, [tasks, filterConfig]);
 
   // Sort tasks
   const sortedTasks = useMemo(() => {
     if (!sortConfig.column) return filteredTasks;
-
     return [...filteredTasks].sort((a, b) => {
       const aVal = a[sortConfig.column] || '';
       const bVal = b[sortConfig.column] || '';
-
-      let comparison = 0;
-      if (typeof aVal === 'number') {
-        comparison = aVal - bVal;
-      } else {
-        comparison = String(aVal).localeCompare(String(bVal));
-      }
-
-      return sortConfig.direction === 'asc' ? comparison : -comparison;
+      const cmp = typeof aVal === 'number' ? aVal - bVal : String(aVal).localeCompare(String(bVal));
+      return sortConfig.direction === 'asc' ? cmp : -cmp;
     });
   }, [filteredTasks, sortConfig]);
 
-  // Export to Excel
+  // Export to CSV
   const handleExport = () => {
-    const headers = COLUMNS.filter(col => visibleColumns[col.key]).map(col => col.label);
-    const rows = sortedTasks.map(task =>
-      COLUMNS.filter(col => visibleColumns[col.key]).map(col => task[col.key] || '')
-    );
-
+    const visibleCols = COLUMNS.filter(col => visibleColumns[col.key] !== false);
+    const headers = visibleCols.map(col => col.label);
+    const rows = sortedTasks.map(task => visibleCols.map(col => task[col.key] || ''));
     const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -519,31 +541,51 @@ const ProjectPlan = ({ project, canEdit }) => {
     toast.success('Plan exported');
   };
 
-  if (loading) {
-    return <div className="text-center py-8">Loading project plan...</div>;
-  }
+  if (loading) return <div className="text-center py-12 text-slate-500">Loading project plan...</div>;
 
-  const frozenCols = COLUMNS.filter(col => col.frozen);
-  const scrollableCols = COLUMNS.filter(col => !col.frozen);
+  const frozenCols = COLUMNS.filter(col => col.frozen && visibleColumns[col.key] !== false);
+  const scrollableCols = COLUMNS.filter(col => !col.frozen && visibleColumns[col.key] !== false);
+  const canUndo = historyIndexRef.current > 0;
+  const canRedo = historyIndexRef.current < historyRef.current.length - 1;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Toolbar */}
-      <div className="flex items-center justify-between bg-white p-4 rounded-lg shadow">
-        <h2 className="text-lg font-semibold text-gray-800">{project.name} › Project Plan</h2>
+      <div className="flex items-center justify-between bg-white px-4 py-3 rounded-xl shadow-sm border border-slate-200">
+        <h2 className="text-sm font-semibold text-slate-700">{project.name} › Project Plan</h2>
         <div className="flex items-center gap-2">
+          {/* Undo/Redo */}
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+            className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+          >
+            <Undo2 size={15} className="text-slate-600" />
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Y)"
+            className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+          >
+            <Redo2 size={15} className="text-slate-600" />
+          </button>
+
+          <div className="w-px h-4 bg-slate-200" />
+
           <button
             onClick={() => setShowColumnMenu(!showColumnMenu)}
-            className="px-3 py-2 bg-gray-100 rounded hover:bg-gray-200 flex items-center gap-2"
+            className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1.5 transition"
           >
-            <Eye size={18} />
-            Hide/Show Columns
+            <Eye size={14} />
+            Columns
           </button>
           <button
             onClick={handleExport}
-            className="px-3 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center gap-2"
+            className="px-3 py-1.5 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg flex items-center gap-1.5 transition"
           >
-            <Download size={18} />
+            <Download size={14} />
             Export
           </button>
         </div>
@@ -551,174 +593,114 @@ const ProjectPlan = ({ project, canEdit }) => {
 
       {/* Column visibility menu */}
       {showColumnMenu && (
-        <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
-          <h3 className="font-semibold mb-3">Show/Hide Columns</h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+        <div className="bg-white p-4 rounded-xl shadow border border-slate-200">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-700">Show/Hide Columns</h3>
+            <button onClick={() => setShowColumnMenu(false)} className="text-xs text-slate-400 hover:text-slate-600">Close</button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             {COLUMNS.map(col => (
-              <label key={col.key} className="flex items-center gap-2 cursor-pointer">
+              <label key={col.key} className="flex items-center gap-2 cursor-pointer text-xs text-slate-600">
                 <input
                   type="checkbox"
                   checked={visibleColumns[col.key] !== false}
-                  onChange={(e) =>
-                    setVisibleColumns({
-                      ...visibleColumns,
-                      [col.key]: e.target.checked,
-                    })
-                  }
+                  onChange={(e) => setVisibleColumns({ ...visibleColumns, [col.key]: e.target.checked })}
                   className="rounded"
                 />
-                <span className="text-sm">{col.label}</span>
+                {col.label}
               </label>
             ))}
           </div>
-          <button
-            onClick={() => setShowColumnMenu(false)}
-            className="mt-4 px-3 py-2 bg-gray-100 rounded hover:bg-gray-200 text-sm"
-          >
-            Close
-          </button>
         </div>
       )}
 
       {/* Main table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div ref={scrollContainerRef} className="overflow-x-auto overflow-y-auto max-h-[600px]" onPaste={handlePaste}>
-          <table className="w-full border-collapse">
-            {/* Header */}
-            <thead className="sticky top-0 bg-gray-50 z-10">
-              <tr>
-                <th className="w-10 sticky left-0 z-20 bg-gray-50 border-b border-r border-gray-200 px-2 py-2 text-xs font-semibold text-gray-700">
-                  #
-                </th>
+          <table className="w-full border-collapse text-xs">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="w-8 sticky left-0 z-20 bg-slate-50 border-r border-slate-200 px-2 py-2 text-slate-500 font-medium">#</th>
 
-                {frozenCols.map((col) =>
-                  visibleColumns[col.key] !== false && (
-                    <th
-                      key={col.key}
-                      style={{ width: col.width }}
-                      className="sticky left-12 z-20 bg-gray-50 border-b border-r border-gray-200 px-3 py-2 text-left text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
-                      onClick={() =>
-                        setSortConfig({
-                          column: col.key,
-                          direction: sortConfig.column === col.key && sortConfig.direction === 'asc' ? 'desc' : 'asc',
-                        })
-                      }
-                    >
-                      <div className="flex items-center gap-1">
-                        {col.label}
-                        <ArrowUpDown size={14} className="opacity-50" />
-                      </div>
-                      {filterConfig[col.key] && (
-                        <input
-                          type="text"
-                          placeholder="Filter..."
-                          value={filterConfig[col.key]}
-                          onChange={(e) =>
-                            setFilterConfig({
-                              ...filterConfig,
-                              [col.key]: e.target.value,
-                            })
-                          }
-                          className="mt-1 px-2 py-1 text-xs border border-gray-300 rounded w-full"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      )}
-                    </th>
-                  )
-                )}
+                {frozenCols.map(col => (
+                  <th key={col.key} style={{ width: col.width, minWidth: col.width }}
+                    className="sticky left-8 z-20 bg-slate-50 border-r border-slate-200 px-3 py-2 text-left font-semibold text-slate-600 cursor-pointer hover:bg-slate-100"
+                    onClick={() => setSortConfig({ column: col.key, direction: sortConfig.column === col.key && sortConfig.direction === 'asc' ? 'desc' : 'asc' })}
+                  >
+                    <div className="flex items-center gap-1">{col.label}<ArrowUpDown size={11} className="opacity-40" /></div>
+                  </th>
+                ))}
 
-                {scrollableCols.map((col) =>
-                  visibleColumns[col.key] !== false && (
-                    <th
-                      key={col.key}
-                      style={{ width: col.width, minWidth: col.width }}
-                      className="border-b border-r border-gray-200 px-3 py-2 text-left text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
-                      onClick={() =>
-                        setSortConfig({
-                          column: col.key,
-                          direction: sortConfig.column === col.key && sortConfig.direction === 'asc' ? 'desc' : 'asc',
-                        })
-                      }
-                    >
-                      <div className="flex items-center gap-1">
-                        {col.label}
-                        <ArrowUpDown size={14} className="opacity-50" />
-                      </div>
-                      {filterConfig[col.key] && (
-                        <input
-                          type="text"
-                          placeholder="Filter..."
-                          value={filterConfig[col.key]}
-                          onChange={(e) =>
-                            setFilterConfig({
-                              ...filterConfig,
-                              [col.key]: e.target.value,
-                            })
-                          }
-                          className="mt-1 px-2 py-1 text-xs border border-gray-300 rounded w-full"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      )}
-                    </th>
-                  )
-                )}
+                {scrollableCols.map(col => (
+                  <th key={col.key} style={{ width: col.width, minWidth: col.width }}
+                    className="border-r border-slate-200 px-3 py-2 text-left font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 whitespace-nowrap"
+                    onClick={() => setSortConfig({ column: col.key, direction: sortConfig.column === col.key && sortConfig.direction === 'asc' ? 'desc' : 'asc' })}
+                  >
+                    <div className="flex items-center gap-1">{col.label}<ArrowUpDown size={11} className="opacity-40" /></div>
+                  </th>
+                ))}
 
-                {isAdmin && <th className="w-10 border-b border-gray-200 px-2 py-2" />}
+                {/* Three-dots column header */}
+                {isDM && <th className="w-8 border-slate-200 bg-slate-50" />}
               </tr>
             </thead>
 
-            {/* Body */}
             <tbody>
               {sortedTasks.map((task, rowIndex) => (
-                <tr key={task.id || rowIndex} className="border-b border-gray-200 hover:bg-gray-50">
-                  <td className="sticky left-0 z-10 bg-white border-r border-gray-200 px-2 py-2 text-xs font-semibold text-gray-500 text-center">
+                <tr key={task.id || rowIndex} className="border-b border-slate-100 hover:bg-slate-50 group">
+                  <td className="sticky left-0 z-10 bg-white border-r border-slate-100 px-2 py-1.5 text-center text-slate-400 font-medium group-hover:bg-slate-50">
                     {rowIndex + 1}
                   </td>
 
-                  {frozenCols.map((col) =>
-                    visibleColumns[col.key] !== false && (
-                      <td
-                        key={`${rowIndex}-${col.key}`}
-                        style={{ width: col.width }}
-                        className="sticky left-12 bg-white border-r border-gray-200 px-3 py-2 text-sm"
-                      >
-                        {editingCell?.row === rowIndex && editingCell?.col === col.key ? (
-                          renderCellEditor(task, col.key, rowIndex)
-                        ) : (
-                          renderCellContent(task, col.key, rowIndex)
-                        )}
-                      </td>
-                    )
-                  )}
+                  {frozenCols.map(col => (
+                    <td key={`${rowIndex}-${col.key}`} style={{ width: col.width, minWidth: col.width }}
+                      className="sticky left-8 bg-white border-r border-slate-100 px-3 py-1.5 group-hover:bg-slate-50">
+                      {editingCell?.row === rowIndex && editingCell?.col === col.key
+                        ? renderCellEditor(task, col.key, rowIndex)
+                        : renderCellContent(task, col.key, rowIndex)}
+                    </td>
+                  ))}
 
-                  {scrollableCols.map((col) =>
-                    visibleColumns[col.key] !== false && (
-                      <td
-                        key={`${rowIndex}-${col.key}`}
-                        style={{ width: col.width, minWidth: col.width }}
-                        className="border-r border-gray-200 px-3 py-2 text-sm"
-                      >
-                        {editingCell?.row === rowIndex && editingCell?.col === col.key ? (
-                          renderCellEditor(task, col.key, rowIndex)
-                        ) : (
-                          renderCellContent(task, col.key, rowIndex)
-                        )}
-                      </td>
-                    )
-                  )}
+                  {scrollableCols.map(col => (
+                    <td key={`${rowIndex}-${col.key}`} style={{ width: col.width, minWidth: col.width }}
+                      className="border-r border-slate-100 px-3 py-1.5">
+                      {editingCell?.row === rowIndex && editingCell?.col === col.key
+                        ? renderCellEditor(task, col.key, rowIndex)
+                        : renderCellContent(task, col.key, rowIndex)}
+                    </td>
+                  ))}
 
-                  {isAdmin && (
-                    <td className="border-gray-200 px-2 py-2 text-center">
+                  {/* Three-dots menu per row */}
+                  {isDM && (
+                    <td className="px-1 py-1.5 relative" onClick={e => e.stopPropagation()}>
                       <button
-                        onClick={() => handleDeleteRow(rowIndex)}
-                        className="text-red-600 hover:text-red-800"
+                        onClick={(e) => { e.stopPropagation(); setOpenMenuRow(openMenuRow === rowIndex ? null : rowIndex); }}
+                        className="p-1 rounded hover:bg-slate-200 opacity-0 group-hover:opacity-100 transition"
                       >
-                        <Trash2 size={16} />
+                        <MoreVertical size={13} className="text-slate-500" />
                       </button>
+                      {openMenuRow === rowIndex && (
+                        <div className="absolute right-0 top-7 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[130px] py-1">
+                          <button
+                            onClick={() => handleDeleteRow(rowIndex)}
+                            className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2"
+                          >
+                            <Trash2 size={12} /> Delete Row
+                          </button>
+                        </div>
+                      )}
                     </td>
                   )}
                 </tr>
               ))}
+
+              {sortedTasks.length === 0 && (
+                <tr>
+                  <td colSpan={frozenCols.length + scrollableCols.length + 2} className="text-center py-12 text-slate-400 text-sm">
+                    No tasks yet. Click "Add Row" to get started.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -728,9 +710,9 @@ const ProjectPlan = ({ project, canEdit }) => {
       {canEdit && (
         <button
           onClick={handleAddRow}
-          className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center gap-2"
+          className="px-4 py-2 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 flex items-center gap-2 text-sm font-medium transition border border-emerald-200"
         >
-          <Plus size={18} />
+          <Plus size={15} />
           Add Row
         </button>
       )}
