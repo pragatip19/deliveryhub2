@@ -177,22 +177,23 @@ export default function HubPage() {
           {filteredAndSearchedProjects.map((project) => (
             <div
               key={project.id}
-              className="bg-white rounded-lg border border-slate-200 p-6 hover:shadow-lg transition-shadow"
+              className="bg-white rounded-lg border border-slate-200 p-6 hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => window.location.href = `/project/${project.id}`}
             >
-              <div className="flex items-start justify-between mb-4">
+              <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
                   <h3 className="text-lg font-semibold text-slate-900 mb-2">
                     {project.name}
                   </h3>
                   <div className="flex gap-2 flex-wrap">
                     <span className="inline-block bg-slate-100 text-slate-700 text-xs font-medium px-3 py-1 rounded-full">
-                      {project.category}
+                      {project.category_name || '—'}
                     </span>
                     {project.deal_status && (
                       <span
                         className={`inline-block text-xs font-medium px-3 py-1 rounded-full ${
                           DEAL_STATUS_COLORS[project.deal_status] ||
-                          DEAL_STATUS_COLORS['Ready for Onboarding']
+                          'bg-slate-100 text-slate-700'
                         }`}
                       >
                         {project.deal_status}
@@ -202,13 +203,18 @@ export default function HubPage() {
                 </div>
               </div>
 
-              <div className="mb-4">
-                <p className="text-sm text-slate-600">
-                  <span className="font-medium">DM:</span> {project.dm?.name || 'Unassigned'}
-                </p>
+              <div className="space-y-1 mb-4 text-sm text-slate-600">
+                <p><span className="font-medium">DM:</span> {project.dm_name || 'Unassigned'}</p>
+                {project.planned_go_live && (
+                  <p><span className="font-medium">Go-Live:</span> {new Date(project.planned_go_live).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}</p>
+                )}
+                {project.kickoff_date && (
+                  <p><span className="font-medium">Kickoff:</span> {new Date(project.kickoff_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}</p>
+                )}
               </div>
 
               <button
+                onClick={e => { e.stopPropagation(); window.location.href = `/project/${project.id}`; }}
                 className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
               >
                 View Project
