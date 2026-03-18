@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Edit2, Save, X, AlertTriangle, CheckCircle2, Clock, TrendingUp, TrendingDown, Minus, Calendar, Target, Zap, Activity } from 'lucide-react';
+import { Edit2, Save, X, AlertTriangle, Activity, TrendingUp, TrendingDown, Minus, Calendar, Target, Clock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getPlanTasks, updateProject, getRaidItems } from '../../../lib/supabase';
 import { calcSOWCompletion, getActiveTasks, getKickoffDate, getProjectedGoLive } from '../../../lib/calculations';
@@ -18,37 +18,54 @@ function fmtDate(d) {
   try { return formatDate(new Date(d)); } catch { return '—'; }
 }
 
-function StatCard({ icon: Icon, iconColor, bg, label, value, sub, editable, onEdit, editing, editValue, onEditChange, onSave, onCancel, type = 'text', accent }) {
+// ── Compact stat card ──────────────────────────────────────────────────────────
+function StatCard({ icon: Icon, iconColor, bg, accent, label, value, sub, editable, onEdit, editing, editValue, onEditChange, onSave, onCancel, type = 'text' }) {
   return (
     <div className={`rounded-xl border p-3 flex flex-col gap-1.5 ${bg}`}>
       <div className="flex items-center justify-between">
-        <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${accent}`}>
-          <Icon size={14} className={iconColor} />
+        <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${accent}`}>
+          <Icon size={13} className={iconColor} />
         </div>
         {editable && !editing && (
           <button onClick={onEdit} className="text-gray-300 hover:text-gray-500 transition-colors">
-            <Edit2 size={12} />
+            <Edit2 size={11} />
           </button>
         )}
       </div>
       <div>
-        <p className="text-[11px] text-slate-500 font-medium leading-none mb-1">{label}</p>
+        <p className="text-[10px] text-slate-500 font-medium leading-none mb-0.5">{label}</p>
         {editing ? (
           <div className="flex items-center gap-1 mt-1">
             <input type={type} value={editValue} onChange={e => onEditChange(e.target.value)}
-              className="flex-1 border border-slate-300 rounded px-2 py-0.5 text-sm text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white" autoFocus />
-            <button onClick={onSave} className="text-green-600 hover:text-green-800"><Save size={12} /></button>
-            <button onClick={onCancel} className="text-red-400 hover:text-red-600"><X size={12} /></button>
+              className="flex-1 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white" autoFocus />
+            <button onClick={onSave} className="text-green-600 hover:text-green-800"><Save size={11} /></button>
+            <button onClick={onCancel} className="text-red-400 hover:text-red-600"><X size={11} /></button>
           </div>
         ) : (
-          <p className="text-base font-bold text-slate-800 leading-tight">{value}</p>
+          <p className="text-sm font-bold text-slate-800 leading-tight">{value}</p>
         )}
-        {sub && <p className="text-[10px] text-slate-400 mt-0.5 leading-none">{sub}</p>}
+        {sub && <p className="text-[9px] text-slate-400 mt-0.5 leading-none">{sub}</p>}
       </div>
     </div>
   );
 }
 
+// ── Coloured count box (risks / issues) ───────────────────────────────────────
+function CountBox({ icon: Icon, count, label, bg, iconBg, iconColor, textColor }) {
+  return (
+    <div className={`rounded-xl border p-3 flex items-center gap-2.5 ${bg}`}>
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${iconBg}`}>
+        <Icon size={16} className={iconColor} />
+      </div>
+      <div>
+        <p className={`text-2xl font-bold leading-none ${textColor}`}>{count}</p>
+        <p className={`text-[10px] font-medium mt-0.5 ${textColor} opacity-80`}>{label}</p>
+      </div>
+    </div>
+  );
+}
+
+// ── SOW progress bar ──────────────────────────────────────────────────────────
 function MiniBar({ label, percent, colorClass, textClass }) {
   return (
     <div className="flex items-center gap-2">
@@ -62,13 +79,13 @@ function MiniBar({ label, percent, colorClass, textClass }) {
 }
 
 export default function ProjectHealth({ project, canEdit }) {
-  const [tasks, setTasks] = useState([]);
-  const [openRisks, setOpenRisks] = useState(0);
+  const [tasks, setTasks]           = useState([]);
+  const [openRisks, setOpenRisks]   = useState(0);
   const [openIssues, setOpenIssues] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]       = useState(true);
   const [localProject, setLocalProject] = useState(project);
-  const [editing, setEditing] = useState(null);
-  const [editVal, setEditVal] = useState('');
+  const [editing, setEditing]       = useState(null);
+  const [editVal, setEditVal]       = useState('');
 
   useEffect(() => { setLocalProject(project); }, [project]);
 
@@ -90,38 +107,39 @@ export default function ProjectHealth({ project, canEdit }) {
     if (project?.id) load();
   }, [project?.id]);
 
+  // ── Derived values ────────────────────────────────────────────────────────────
   const categoryName = localProject?.category_name || '';
-  const targetDays = getTargetDays(categoryName);
+  const targetDays   = getTargetDays(categoryName);
 
   const kickoffFromPlan = getKickoffDate(tasks);
-  const kickoffDate = localProject?.kickoff_date || kickoffFromPlan;
+  const kickoffDate     = localProject?.kickoff_date || kickoffFromPlan;
   const projectedGoLive = getProjectedGoLive(tasks) || localProject?.projected_go_live;
-  const plannedGoLive = kickoffDate ? addWorkdays(new Date(kickoffDate), targetDays) : null;
+  const plannedGoLive   = kickoffDate ? addWorkdays(new Date(kickoffDate), targetDays) : null;
 
-  const workCompleted = kickoffDate ? networkdays(new Date(kickoffDate), today()) : 0;
+  const workCompleted          = kickoffDate ? networkdays(new Date(kickoffDate), today()) : 0;
   const projectedOnboardingDays = projectedGoLive && kickoffDate
     ? networkdays(new Date(kickoffDate), new Date(projectedGoLive)) : null;
+  const daysRemaining = plannedGoLive
+    ? Math.max(0, networkdays(today(), new Date(plannedGoLive)) - 1) : null;
 
-  // Delay Days: Release System task — networkdays(baseline_planned_end, planned_end) - 1
+  // Delay Days from "Release System" task
   const releaseTask = tasks.find(t => t.activities?.toLowerCase().includes('release system'));
-  const delayDays = (releaseTask?.baseline_planned_end && releaseTask?.planned_end)
+  const delayDays   = (releaseTask?.baseline_planned_end && releaseTask?.planned_end)
     ? Math.max(0, networkdays(parseDate(releaseTask.baseline_planned_end), parseDate(releaseTask.planned_end)) - 1)
     : null;
 
-  const sowCompletion = calcSOWCompletion(tasks, targetDays);
-  const currentSOW = sowCompletion?.current ?? 0;
-  const expectedSOW = sowCompletion?.expected ?? 0;
-  const delta = currentSOW - expectedSOW;
+  // SOW — use projectedOnboardingDays (dynamic) as denominator; fall back to targetDays
+  const sowCompletion = calcSOWCompletion(tasks, projectedOnboardingDays || targetDays);
+  const currentSOW    = sowCompletion?.current  ?? 0;
+  const expectedSOW   = sowCompletion?.expected ?? 0;
+  const sowDelta      = currentSOW - expectedSOW;
 
-  const activeTasks = getActiveTasks(tasks);
-  const daysRemaining = plannedGoLive ? Math.max(0, networkdays(today(), new Date(plannedGoLive)) - 1) : null;
-
-  const isDelayed = projectedGoLive && plannedGoLive && new Date(projectedGoLive) > new Date(plannedGoLive);
+  const isDelayed   = projectedGoLive && plannedGoLive && new Date(projectedGoLive) > new Date(plannedGoLive);
   const statusLabel = !kickoffDate ? 'Not Started' : (delayDays > 0 || isDelayed) ? 'Delayed' : 'On Track';
   const statusStyle = {
-    'On Track': 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    'Delayed': 'bg-red-100 text-red-700 border-red-200',
-    'Not Started': 'bg-slate-100 text-slate-600 border-slate-200',
+    'On Track':   'bg-emerald-100 text-emerald-700 border-emerald-200',
+    'Delayed':    'bg-red-100 text-red-700 border-red-200',
+    'Not Started':'bg-slate-100 text-slate-600 border-slate-200',
   }[statusLabel];
 
   async function saveField(field, value) {
@@ -140,7 +158,8 @@ export default function ProjectHealth({ project, canEdit }) {
   );
 
   return (
-    <div className="p-5 space-y-5 max-w-5xl">
+    <div className="p-5 space-y-4 max-w-5xl">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -150,126 +169,127 @@ export default function ProjectHealth({ project, canEdit }) {
         <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${statusStyle}`}>{statusLabel}</span>
       </div>
 
-      {/* Top Row: Risks · Issues · Active Tasks · Delay Days */}
+      {/* ── Row 1: Target SOW Days · PO Date · Kickoff Date · Planned Go-Live ── */}
       <div className="grid grid-cols-4 gap-3">
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-3">
-          <div className="w-9 h-9 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
-            <AlertTriangle size={17} className="text-amber-600" />
-          </div>
-          <div>
-            <p className="text-xl font-bold text-amber-700 leading-none">{openRisks}</p>
-            <p className="text-[11px] text-amber-600 font-medium mt-0.5">Open Risks</p>
-          </div>
-        </div>
-
-        <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-center gap-3">
-          <div className="w-9 h-9 bg-red-100 rounded-xl flex items-center justify-center shrink-0">
-            <Activity size={17} className="text-red-600" />
-          </div>
-          <div>
-            <p className="text-xl font-bold text-red-700 leading-none">{openIssues}</p>
-            <p className="text-[11px] text-red-600 font-medium mt-0.5">Open Issues</p>
-          </div>
-        </div>
-
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center gap-3">
-          <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center shrink-0">
-            <CheckCircle2 size={17} className="text-blue-600" />
-          </div>
-          <div>
-            <p className="text-xl font-bold text-blue-700 leading-none">{activeTasks}</p>
-            <p className="text-[11px] text-blue-600 font-medium mt-0.5">Active Tasks</p>
-          </div>
-        </div>
-
-        <div className={`border rounded-xl p-3 flex items-center gap-3 ${
-          delayDays === null ? 'bg-slate-50 border-slate-200'
-          : delayDays > 0 ? 'bg-orange-50 border-orange-200'
-          : 'bg-emerald-50 border-emerald-200'
-        }`}>
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-            delayDays === null ? 'bg-slate-100' : delayDays > 0 ? 'bg-orange-100' : 'bg-emerald-100'
-          }`}>
-            <Zap size={17} className={
-              delayDays === null ? 'text-slate-400' : delayDays > 0 ? 'text-orange-600' : 'text-emerald-600'
-            } />
-          </div>
-          <div>
-            <p className={`text-xl font-bold leading-none ${
-              delayDays === null ? 'text-slate-400' : delayDays > 0 ? 'text-orange-700' : 'text-emerald-700'
-            }`}>
-              {delayDays === null ? '—' : delayDays > 0 ? `+${delayDays}d` : '0d'}
-            </p>
-            <p className={`text-[11px] font-medium mt-0.5 ${
-              delayDays === null ? 'text-slate-400' : delayDays > 0 ? 'text-orange-600' : 'text-emerald-600'
-            }`}>Delay Days</p>
-            {releaseTask && <p className="text-[10px] text-slate-400">Release System</p>}
-          </div>
-        </div>
-      </div>
-
-      {/* Key Dates */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard icon={Calendar} iconColor="text-violet-600" bg="bg-violet-50 border border-violet-100" accent="bg-violet-100"
+        <StatCard icon={Target} iconColor="text-indigo-600" bg="bg-indigo-50 border-indigo-100" accent="bg-indigo-100"
+          label="Target SOW Days" value={`${targetDays}d`} sub={`${categoryName || 'Default'} benchmark`}
+        />
+        <StatCard icon={Calendar} iconColor="text-slate-500" bg="bg-slate-50 border-slate-200" accent="bg-slate-100"
+          label="PO Date" value={fmtDate(localProject?.po_date)}
+          editable={canEdit} editing={editing === 'po_date'} editValue={editVal} type="date"
+          onEdit={() => { setEditing('po_date'); setEditVal(localProject?.po_date || ''); }}
+          onEditChange={setEditVal} onSave={() => saveField('po_date', editVal)} onCancel={() => setEditing(null)}
+        />
+        <StatCard icon={Calendar} iconColor="text-violet-600" bg="bg-violet-50 border-violet-100" accent="bg-violet-100"
           label="Kickoff Date" value={fmtDate(kickoffDate)}
           sub={kickoffFromPlan && !localProject?.kickoff_date ? 'From plan' : 'Manual'}
           editable={canEdit} editing={editing === 'kickoff_date'} editValue={editVal} type="date"
           onEdit={() => { setEditing('kickoff_date'); setEditVal(kickoffDate ? formatDateInput(new Date(kickoffDate)) : ''); }}
           onEditChange={setEditVal} onSave={() => saveField('kickoff_date', editVal)} onCancel={() => setEditing(null)}
         />
-        <StatCard icon={Calendar} iconColor="text-slate-500" bg="bg-slate-50 border border-slate-200" accent="bg-slate-100"
-          label="PO Date" value={fmtDate(localProject?.po_date)}
-          editable={canEdit} editing={editing === 'po_date'} editValue={editVal} type="date"
-          onEdit={() => { setEditing('po_date'); setEditVal(localProject?.po_date || ''); }}
-          onEditChange={setEditVal} onSave={() => saveField('po_date', editVal)} onCancel={() => setEditing(null)}
-        />
-        <StatCard icon={Target} iconColor="text-indigo-600" bg="bg-indigo-50 border border-indigo-100" accent="bg-indigo-100"
-          label="Target SOW Days" value={`${targetDays} days`} sub={`${categoryName || 'Default'} benchmark`}
-        />
-        <StatCard icon={Clock} iconColor="text-teal-600" bg="bg-teal-50 border border-teal-100" accent="bg-teal-100"
-          label="Work Completed" value={workCompleted ? `${workCompleted}d` : '—'}
-          sub={kickoffDate ? `Since ${fmtDate(kickoffDate)}` : 'Awaiting kickoff'}
-        />
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard icon={TrendingUp} iconColor="text-green-600" bg="bg-green-50 border border-green-100" accent="bg-green-100"
+        <StatCard icon={TrendingUp} iconColor="text-green-600" bg="bg-green-50 border-green-100" accent="bg-green-100"
           label="Planned Go-Live" value={fmtDate(plannedGoLive)}
           sub={kickoffDate ? `Kickoff + ${targetDays}d` : 'Awaiting kickoff'}
         />
-        <StatCard icon={TrendingUp} iconColor="text-blue-600" bg="bg-blue-50 border border-blue-100" accent="bg-blue-100"
-          label="Projected Go-Live" value={fmtDate(projectedGoLive)} sub="From Release System task"
-        />
-        <StatCard icon={Clock} iconColor="text-orange-600" bg="bg-orange-50 border border-orange-100" accent="bg-orange-100"
-          label="Projected Days" value={projectedOnboardingDays ? `${projectedOnboardingDays}d` : '—'}
-          sub="Kickoff → Projected go-live"
-        />
-        <StatCard icon={TrendingDown} iconColor="text-pink-600" bg="bg-pink-50 border border-pink-100" accent="bg-pink-100"
-          label="Days Remaining" value={daysRemaining !== null ? `${daysRemaining}d` : '—'}
-          sub="Until planned go-live"
-        />
       </div>
 
-      {/* SOW Completion */}
+      {/* ── Rows 2 & 3 + Risk/Issue sidebar ── */}
+      <div className="flex gap-3 items-start">
+
+        {/* Left: rows 2 & 3 stacked */}
+        <div className="flex-1 space-y-3">
+
+          {/* Row 2: Onboarding Days · Projected Go-Live */}
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard icon={Clock} iconColor="text-orange-600" bg="bg-orange-50 border-orange-100" accent="bg-orange-100"
+              label="Project Onboarding Days" value={projectedOnboardingDays ? `${projectedOnboardingDays}d` : '—'}
+              sub="Kickoff → Projected go-live"
+            />
+            <StatCard icon={TrendingUp} iconColor="text-blue-600" bg="bg-blue-50 border-blue-100" accent="bg-blue-100"
+              label="Projected Go-Live" value={fmtDate(projectedGoLive)} sub="From Release System task"
+            />
+          </div>
+
+          {/* Row 3: Work Completed · Days Remaining · Delay Days */}
+          <div className="grid grid-cols-3 gap-3">
+            <StatCard icon={TrendingUp} iconColor="text-teal-600" bg="bg-teal-50 border-teal-100" accent="bg-teal-100"
+              label="Work Completed" value={workCompleted ? `${workCompleted}d` : '—'}
+              sub={kickoffDate ? `Since ${fmtDate(kickoffDate)}` : 'Awaiting kickoff'}
+            />
+            <StatCard icon={Clock} iconColor="text-pink-600" bg="bg-pink-50 border-pink-100" accent="bg-pink-100"
+              label="Days Remaining" value={daysRemaining !== null ? `${daysRemaining}d` : '—'}
+              sub="Until planned go-live"
+            />
+            <div className={`rounded-xl border p-3 flex flex-col gap-1.5 ${
+              delayDays === null ? 'bg-slate-50 border-slate-200'
+              : delayDays > 0   ? 'bg-red-50 border-red-100'
+              : 'bg-emerald-50 border-emerald-100'
+            }`}>
+              <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
+                delayDays === null ? 'bg-slate-100' : delayDays > 0 ? 'bg-red-100' : 'bg-emerald-100'
+              }`}>
+                {delayDays > 0
+                  ? <TrendingDown size={13} className="text-red-600" />
+                  : <TrendingUp   size={13} className={delayDays === null ? 'text-slate-400' : 'text-emerald-600'} />
+                }
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-500 font-medium leading-none mb-0.5">Delay Days</p>
+                <p className={`text-sm font-bold leading-tight ${
+                  delayDays === null ? 'text-slate-400' : delayDays > 0 ? 'text-red-700' : 'text-emerald-700'
+                }`}>
+                  {delayDays === null ? '—' : delayDays > 0 ? `+${delayDays}d` : '0d'}
+                </p>
+                {releaseTask && <p className="text-[9px] text-slate-400 mt-0.5">Release System</p>}
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Right sidebar: Risks + Issues */}
+        <div className="w-36 flex flex-col gap-3 shrink-0">
+          <CountBox icon={AlertTriangle}
+            count={openRisks} label="Open Risks"
+            bg="bg-amber-50 border border-amber-200"
+            iconBg="bg-amber-100" iconColor="text-amber-600" textColor="text-amber-700"
+          />
+          <CountBox icon={Activity}
+            count={openIssues} label="Open Issues"
+            bg="bg-red-50 border border-red-200"
+            iconBg="bg-red-100" iconColor="text-red-600" textColor="text-red-700"
+          />
+        </div>
+
+      </div>
+
+      {/* ── SOW Completion ── */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-slate-700">SOW Completion</h3>
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700">SOW Completion</h3>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              Denominator: {projectedOnboardingDays ? `${projectedOnboardingDays}d` : `${targetDays}d`} projected days
+            </p>
+          </div>
           <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 border ${
-            delta >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-            : delta >= -10 ? 'bg-amber-50 text-amber-700 border-amber-200'
-            : 'bg-red-50 text-red-700 border-red-200'
+            sowDelta >= 0
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              : sowDelta >= -10
+              ? 'bg-amber-50 text-amber-700 border-amber-200'
+              : 'bg-red-50 text-red-700 border-red-200'
           }`}>
-            {delta >= 0 ? <TrendingUp size={11} /> : delta >= -10 ? <Minus size={11} /> : <TrendingDown size={11} />}
-            {delta >= 0 ? `+${delta.toFixed(1)}% ahead` : `${Math.abs(delta).toFixed(1)}% behind`}
+            {sowDelta >= 0 ? <TrendingUp size={11} /> : sowDelta >= -10 ? <Minus size={11} /> : <TrendingDown size={11} />}
+            {sowDelta >= 0 ? `+${sowDelta.toFixed(1)}% ahead` : `${Math.abs(sowDelta).toFixed(1)}% behind`}
           </span>
         </div>
         <div className="space-y-2.5">
-          <MiniBar label="Current %" percent={currentSOW} colorClass="bg-emerald-500" textClass="text-emerald-700" />
-          <MiniBar label="Expected %" percent={expectedSOW} colorClass="bg-blue-400" textClass="text-blue-600" />
+          <MiniBar label="Current %"  percent={currentSOW}  colorClass="bg-emerald-500" textClass="text-emerald-700" />
+          <MiniBar label="Expected %" percent={expectedSOW} colorClass="bg-blue-400"    textClass="text-blue-600" />
         </div>
-        <div className="mt-3 flex items-center gap-4 text-[10px] text-slate-400">
-          <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded bg-emerald-500 inline-block" /> Current: Done task duration / total</span>
-          <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded bg-blue-400 inline-block" /> Expected: overdue task duration / total</span>
+        <div className="mt-3 flex flex-wrap items-center gap-4 text-[10px] text-slate-400">
+          <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded bg-emerald-500 inline-block" /> Current: overlap-adjusted weight of Done tasks</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded bg-blue-400 inline-block" /> Expected: elapsed days / projected onboarding days</span>
         </div>
       </div>
     </div>
