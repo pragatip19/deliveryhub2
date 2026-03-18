@@ -51,6 +51,7 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
         name: '',
         category_id: defaultCat?.id || '',
         dm_id: defaultDmId,
+        deal_status: 'Ready for Onboarding',
         record_id: ''
       });
     } catch (error) {
@@ -93,7 +94,7 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
         category_id: formData.category_id,
         dm_id: formData.dm_id,
         record_id: formData.record_id || null,
-        deal_status: 'Ready for Onboarding',
+        deal_status: formData.deal_status || 'Ready for Onboarding',
         uat_type: ['CLEEN'].includes(categoryName) ? null : (categoryName === 'Logbooks' ? 'logbooks' : 'mes'),
       });
 
@@ -204,6 +205,17 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
               ))}
             </select>
             {isDM() && <p className="text-xs text-slate-400 mt-1">Assigned to you automatically</p>}
+          </div>
+
+          {/* Deal Stage */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Deal Stage</label>
+            <select name="deal_status" value={formData.deal_status} onChange={handleChange}
+              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all bg-white text-slate-900">
+              <option value="Ready for Onboarding">Ready for Onboarding</option>
+              <option value="Under Onboarding">Under Onboarding</option>
+              <option value="Live-Under Scaleup">Live-Under Scaleup</option>
+            </select>
           </div>
 
           {/* Record ID */}
