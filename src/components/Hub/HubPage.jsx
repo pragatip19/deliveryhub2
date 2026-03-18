@@ -204,13 +204,25 @@ export default function HubPage() {
                 </div>
               </div>
 
-              <div className="space-y-1 mb-4 text-sm text-slate-600">
-                <p><span className="font-medium">DM:</span> {project.dm_name || 'Unassigned'}</p>
-                {project.planned_go_live && (
-                  <p><span className="font-medium">Go-Live:</span> {new Date(project.planned_go_live).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}</p>
-                )}
+              <div className="space-y-1.5 mb-4 text-sm text-slate-600">
+                <p><span className="font-medium text-slate-700">DM:</span> {project.dm_name || 'Unassigned'}</p>
+                <p>
+                  <span className="font-medium text-slate-700">Status:</span>{' '}
+                  <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${DEAL_STATUS_COLORS[project.deal_status] || 'bg-slate-100 text-slate-700'}`}>
+                    {project.deal_status || '—'}
+                  </span>
+                </p>
+                <p>
+                  <span className="font-medium text-slate-700">Go-Live:</span>{' '}
+                  {project.planned_go_live
+                    ? new Date(project.planned_go_live).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
+                    : '—'}
+                </p>
                 {project.kickoff_date && (
-                  <p><span className="font-medium">Kickoff:</span> {new Date(project.kickoff_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}</p>
+                  <p>
+                    <span className="font-medium text-slate-700">Kickoff:</span>{' '}
+                    {new Date(project.kickoff_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}
+                  </p>
                 )}
               </div>
 
