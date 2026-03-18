@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   createProject,
   getAllProfiles,
+  getCategories,
   bulkUpsertMilestones,
   bulkUpsertPlanTasks,
   bulkUpsertSOWItems,
@@ -15,36 +16,46 @@ import {
   getTemplateForCategory,
   SOW_TEMPLATE,
   PAYMENTS_TEMPLATE,
-  APPLICATIONS
 } from '../../lib/templates';
 
 export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
-  const { user } = useAuth();
+  const { user, profile, isAdmin, isDM } = useAuth();
   const [loading, setLoading] = useState(false);
   const [dmProfiles, setDmProfiles] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [formData, setFormData] = useState({
     name: '',
-    category: 'MES',
-    dm_id: user?.id || '',
+    category_id: '',
+    dm_id: '',
     record_id: ''
   });
 
   useEffect(() => {
     if (isOpen) {
-      loadDmProfiles();
-      if (user?.role === 'dm') {
-        setFormData((prev) => ({ ...prev, dm_id: user.id }));
-      }
+      loadData();
     }
-  }, [isOpen, user]);
+  }, [isOpen]);
 
-  const loadDmProfiles = async () => {
+  const loadData = async () => {
     try {
-      const profiles = await getAllProfiles();
-      setDmProfiles(profiles.filter((p) => p.role === 'dm') || []);
+      const [profiles, cats] = await Promise.all([getAllProfiles(), getCategories()]);
+      setDmProfiles(profiles || []);
+      setCategories(cats || []);
+
+      // Default category to first available
+      const defaultCat = cats?.[0];
+      // Default DM: if current user is DM, set to themselves
+      const defaultDmId = isDM() ? profile?.id : '';
+
+      setFormData({
+        name: '',
+        category_id: defaultCat?.id || '',
+        dm_id: defaultDmId,
+        record_id: ''
+      });
     } catch (error) {
-      console.error('Error loading DM profiles:', error);
-      toast.error('Failed to load delivery managers');
+      console.error('Error loading modal data:', error);
+      toast.error('Failed to load form data');
     }
   };
 
@@ -60,7 +71,10 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
       toast.error('Project name is required');
       return;
     }
-
+    if (!formData.category_id) {
+      toast.error('Application is required');
+      return;
+    }
     if (!formData.dm_id) {
       toast.error('Delivery Manager is required');
       return;
@@ -69,25 +83,26 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
     try {
       setLoading(true);
 
+      // Get category name for template lookup
+      const selectedCat = categories.find(c => c.id === formData.category_id);
+      const categoryName = selectedCat?.name || '';
+
       // Create the project
       const newProject = await createProject({
-        name: formData.name,
-        category: formData.category,
+        name: formData.name.trim(),
+        category_id: formData.category_id,
         dm_id: formData.dm_id,
         record_id: formData.record_id || null,
-        deal_status: 'Ready for Onboarding'
+        deal_status: 'Ready for Onboarding',
+        uat_type: ['CLEEN'].includes(categoryName) ? null : (categoryName === 'Logbooks' ? 'logbooks' : 'mes'),
       });
 
-      if (!newProject || !newProject.id) {
-        throw new Error('Failed to create project');
-      }
-
+      if (!newProject?.id) throw new Error('Failed to create project');
       const projectId = newProject.id;
 
       // Load template milestones and tasks
-      const template = getTemplateForCategory(formData.category);
+      const template = getTemplateForCategory(categoryName);
       if (template) {
-        // Strip dates from milestone templates
         const milestonesToInsert = (template.milestones || []).map((m) => ({
           ...m,
           project_id: projectId,
@@ -96,51 +111,33 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
           baseline_planned_start: null,
           baseline_planned_end: null
         }));
+        if (milestonesToInsert.length > 0) await bulkUpsertMilestones(milestonesToInsert);
 
-        if (milestonesToInsert.length > 0) {
-          await bulkUpsertMilestones(milestonesToInsert);
-        }
-
-        // Strip dates from task templates
         const tasksToInsert = (template.tasks || []).map((t) => ({
           ...t,
           project_id: projectId,
           planned_start: null,
           planned_end: null,
           baseline_planned_start: null,
-          baseline_planned_end: null
+          baseline_planned_end: null,
+          actual_start: null,
+          current_end: null,
         }));
-
-        if (tasksToInsert.length > 0) {
-          await bulkUpsertPlanTasks(tasksToInsert);
-        }
+        if (tasksToInsert.length > 0) await bulkUpsertPlanTasks(tasksToInsert);
       }
 
       // Load SOW template
-      const sowItemsToInsert = (SOW_TEMPLATE || []).map((item) => ({
-        ...item,
-        project_id: projectId
-      }));
-
-      if (sowItemsToInsert.length > 0) {
-        await bulkUpsertSOWItems(sowItemsToInsert);
-      }
+      const sowItems = (SOW_TEMPLATE || []).map((item) => ({ ...item, project_id: projectId }));
+      if (sowItems.length > 0) await bulkUpsertSOWItems(sowItems);
 
       // Load Payments template
-      const paymentsToInsert = (PAYMENTS_TEMPLATE || []).map((payment) => ({
-        ...payment,
-        project_id: projectId
-      }));
+      const paymentItems = (PAYMENTS_TEMPLATE || []).map((p) => ({ ...p, project_id: projectId }));
+      if (paymentItems.length > 0) await bulkUpsertPayments(paymentItems);
 
-      if (paymentsToInsert.length > 0) {
-        await bulkUpsertPayments(paymentsToInsert);
-      }
+      // Sync deal record
+      try { await syncDeal(projectId); } catch (e) { console.warn('syncDeal failed:', e); }
 
-      // Sync deal
-      await syncDeal(projectId);
-
-      toast.success('Project created successfully');
-      setFormData({ name: '', category: 'MES', dm_id: user?.id || '', record_id: '' });
+      toast.success('Project created successfully!');
       onProjectCreated();
       onClose();
     } catch (error) {
@@ -158,10 +155,7 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
       <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white border-b border-slate-200 p-6 flex items-center justify-between">
           <h2 className="text-2xl font-bold text-slate-900">New Project</h2>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 transition-colors"
-          >
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
             <X size={24} />
           </button>
         </div>
@@ -169,75 +163,66 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           {/* Project Name */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Project Name *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Project Name *</label>
             <input
               type="text"
               name="name"
               value={formData.name}
               onChange={handleChange}
               placeholder="Enter project name"
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900"
             />
           </div>
 
-          {/* Category */}
+          {/* Application */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Category *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Application *</label>
             <select
-              name="category"
-              value={formData.category}
+              name="category_id"
+              value={formData.category_id}
               onChange={handleChange}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all bg-white"
+              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all bg-white text-slate-900"
             >
-              {APPLICATIONS.map((app) => (
-                <option key={app} value={app}>
-                  {app}
-                </option>
+              <option value="">Select application</option>
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
               ))}
             </select>
           </div>
 
           {/* Delivery Manager */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Delivery Manager *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Delivery Manager *</label>
             <select
               name="dm_id"
               value={formData.dm_id}
               onChange={handleChange}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all bg-white"
+              disabled={isDM()}
+              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all bg-white text-slate-900 disabled:bg-slate-50 disabled:text-slate-500"
             >
-              <option value="">Select a delivery manager</option>
-              {dmProfiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                </option>
+              <option value="">Select delivery manager</option>
+              {dmProfiles.map((p) => (
+                <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
               ))}
             </select>
+            {isDM() && <p className="text-xs text-slate-400 mt-1">Assigned to you automatically</p>}
           </div>
 
           {/* Record ID */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Record ID (Optional)
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Record ID (Optional)</label>
             <input
               type="text"
               name="record_id"
               value={formData.record_id}
               onChange={handleChange}
-              placeholder="Enter record ID"
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+              placeholder="Enter CRM record ID"
+              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900"
             />
           </div>
 
           {/* Buttons */}
-          <div className="flex gap-3 pt-6">
+          <div className="flex gap-3 pt-4">
             <button
               type="button"
               onClick={onClose}
