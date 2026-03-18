@@ -199,12 +199,11 @@ export function calcVsBaseline(task) {
  * Get target onboarding days by application category
  */
 export function getTargetOnboardingDays(categoryName) {
-  const map = {
-    'MES': 72, 'DMS': 72, 'AI Investigator': 72, 'LMS': 72, 'AI Agents': 72,
-    'Logbooks': 60,
-    'CLEEN': 30,
-  };
-  return map[categoryName] || null;
+  if (!categoryName) return 72;
+  const name = categoryName.toLowerCase();
+  if (name === 'cleen') return 36;
+  if (name === 'logbooks') return 60;
+  return 72; // MES, DMS, AI Investigator, LMS, AI Agents, and all others
 }
 
 /**
