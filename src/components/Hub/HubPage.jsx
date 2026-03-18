@@ -24,7 +24,7 @@ const DEAL_STATUS_COLORS = {
 };
 
 export default function HubPage() {
-  const { user } = useAuth();
+  const { user, profile, isAdmin, isDM, isLeadership } = useAuth();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -32,9 +32,9 @@ export default function HubPage() {
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [viewMode, setViewMode] = useState('my'); // 'my' or 'all'
 
-  const isAdminOrDm = user?.role === 'admin' || user?.role === 'dm';
-  const showViewToggle = user?.role === 'dm';
-  const shouldShowAllProjects = user?.role === 'admin' || user?.role === 'leadership' || viewMode === 'all';
+  const isAdminOrDm = isAdmin() || isDM();
+  const showViewToggle = isDM();
+  const shouldShowAllProjects = isAdmin() || isLeadership() || viewMode === 'all';
 
   useEffect(() => {
     loadProjects();
@@ -77,7 +77,7 @@ export default function HubPage() {
   }, [projects, selectedCategory, searchQuery]);
 
   const canEditProject = (project) => {
-    return user?.role === 'admin' || project.dm_id === user?.id;
+    return isAdmin() || project.dm_id === profile?.id;
   };
 
   const handleProjectCreated = () => {
