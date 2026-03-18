@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Eye, Download, Plus, Trash2, ArrowUpDown, MoreVertical,
-  Undo2, Redo2, ArrowDownToLine, ArrowUpToLine, Bold, Copy, Clipboard,
+  Undo2, Redo2, ArrowDownToLine, ArrowUpToLine, Bold, Copy, Clipboard, Edit2, GripVertical,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import debounce from 'lodash.debounce';
@@ -10,11 +10,13 @@ import {
   getPlanTasks, bulkUpsertPlanTasks, upsertPlanTask, deletePlanTask,
   getMilestones, getPeople,
 } from '../../../lib/supabase';
-import { STATUS_OPTIONS } from '../../../lib/templates';
+import { STATUS_OPTIONS, PLAN_TEMPLATE } from '../../../lib/templates';
 import { recalculatePlan, getStatusColor } from '../../../lib/calculations';
 import { calcPlannedEnd, formatDate, formatDateInput, parseDate, networkdays } from '../../../lib/workdays';
 
 // ─── Column definitions ────────────────────────────────────────────────────────
+const ROW_NUM_W = 32; // px width of the leading "#" column
+
 const COLUMNS = [
   { key: 'milestone',              label: 'Milestone',            width: 160, frozen: true,  type: 'milestone' },
   { key: 'activities',             label: 'Activities',           width: 220, frozen: true,  type: 'text' },
@@ -65,20 +67,24 @@ const ProjectPlan = ({ project, canEdit }) => {
   const isProjectAdmin = canEdit && isAdminFn();
   const isDM = canEdit;
 
-  const [tasks, setTasks]             = useState([]);
-  const [milestones, setMilestones]   = useState([]);
-  const [people, setPeople]           = useState([]);
-  const [visibleCols, setVisibleCols] = useState(() => {
+  const [tasks, setTasks]               = useState([]);
+  const [milestones, setMilestones]     = useState([]);
+  const [people, setPeople]             = useState([]);
+  const [visibleCols, setVisibleCols]   = useState(() => {
     const init = {}; COLUMNS.forEach(c => { init[c.key] = true; }); return init;
   });
-  const [sortConfig, setSortConfig]   = useState({ col: null, dir: 'asc' });
-  const [showColMenu, setShowColMenu] = useState(false);
-  const [selectedCell, setSelectedCell] = useState(null);  // { taskId, col } — single-click select
-  const [editCell, setEditCell]       = useState(null);    // { taskId, col } — double-click edit
-  const [copiedCell, setCopiedCell]   = useState(null);    // { taskId, col, value }
-  const [toolbarPos, setToolbarPos]   = useState(null);    // { top, left } fixed position
-  const [loading, setLoading]         = useState(true);
-  const [openMenu, setOpenMenu]       = useState(null);
+  const [sortConfig, setSortConfig]     = useState({ col: null, dir: 'asc' });
+  const [showColMenu, setShowColMenu]   = useState(false);
+  const [selectedCell, setSelectedCell] = useState(null);   // { taskId, col }
+  const [editCell, setEditCell]         = useState(null);    // { taskId, col }
+  const [copiedCell, setCopiedCell]     = useState(null);    // { taskId, col, value }
+  const [toolbarPos, setToolbarPos]     = useState(null);    // { top, left }
+  const [loading, setLoading]           = useState(true);
+  const [openMenu, setOpenMenu]         = useState(null);
+
+  // Drag-to-reorder state
+  const [dragId, setDragId]             = useState(null);
+  const [dragOverId, setDragOverId]     = useState(null);
 
   // Undo/redo
   const historyRef    = useRef([]);
@@ -103,7 +109,7 @@ const ProjectPlan = ({ project, canEdit }) => {
     })();
   }, [project?.id]);
 
-  // ── History helpers ───────────────────────────────────────────────────────────
+  // ── History ───────────────────────────────────────────────────────────────────
   function pushHistory(t) {
     if (isUndoRedoRef.current) return;
     historyRef.current = historyRef.current.slice(0, histIdxRef.current + 1);
@@ -146,14 +152,10 @@ const ProjectPlan = ({ project, canEdit }) => {
   useEffect(() => {
     const h = (e) => {
       const ctrl = e.metaKey || e.ctrlKey;
-
-      // Undo / Redo
       if (ctrl && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
       if (ctrl && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return; }
 
-      // When a cell is selected but not editing
       if (selectedCell && !editCell) {
-        // Ctrl+C — copy cell
         if (ctrl && e.key === 'c') {
           const task = tasks.find(t => t.id === selectedCell.taskId);
           if (task) {
@@ -164,7 +166,6 @@ const ProjectPlan = ({ project, canEdit }) => {
           }
           return;
         }
-        // Ctrl+V — paste into selected cell
         if (ctrl && e.key === 'v') {
           e.preventDefault();
           navigator.clipboard.readText().then(text => {
@@ -172,42 +173,32 @@ const ProjectPlan = ({ project, canEdit }) => {
           }).catch(() => {});
           return;
         }
-        // Ctrl+B — toggle bold on selected cell
         if (ctrl && e.key === 'b') {
           e.preventDefault();
           handleToggleBold(selectedCell.taskId, selectedCell.col);
           return;
         }
-        // Enter / F2 — enter edit mode
         if (e.key === 'Enter' || e.key === 'F2') {
           e.preventDefault();
           setEditCell(selectedCell);
           return;
         }
-        // Escape — deselect
-        if (e.key === 'Escape') {
-          setSelectedCell(null); setToolbarPos(null);
-        }
-        // Delete / Backspace — clear cell
+        if (e.key === 'Escape') { setSelectedCell(null); setToolbarPos(null); }
         if (e.key === 'Delete' || e.key === 'Backspace') {
           const col = COLUMNS.find(c => c.key === selectedCell.col);
           if (col && !col.readOnly) handleCellChange(selectedCell.taskId, selectedCell.col, '');
         }
       }
-      // Escape while editing — cancel edit
-      if (editCell && e.key === 'Escape') {
-        setEditCell(null);
-      }
+      if (editCell && e.key === 'Escape') { setEditCell(null); }
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [selectedCell, editCell, tasks]);
 
-  // Close menus on outside click
+  // Close menus/toolbar on outside click
   useEffect(() => {
     const h = (e) => {
       setOpenMenu(null);
-      // Only deselect if click is truly outside the table area
       if (!e.target.closest('[data-plan-table]') && !e.target.closest('[data-format-toolbar]')) {
         setSelectedCell(null); setToolbarPos(null);
       }
@@ -275,10 +266,7 @@ const ProjectPlan = ({ project, canEdit }) => {
       const next = [...prev];
       const task = { ...next[idx] };
       const existing = task.cell_formatting || {};
-      task.cell_formatting = {
-        ...existing,
-        [colKey]: { ...(existing[colKey] || {}), ...patch },
-      };
+      task.cell_formatting = { ...existing, [colKey]: { ...(existing[colKey] || {}), ...patch } };
       next[idx] = task;
       pushHistory(next); debouncedSave(next);
       return next;
@@ -288,8 +276,7 @@ const ProjectPlan = ({ project, canEdit }) => {
   function handleToggleBold(taskId, colKey) {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
-    const fmt = getCellFmt(task, colKey);
-    applyFormat(taskId, colKey, { bold: !fmt.bold });
+    applyFormat(taskId, colKey, { bold: !getCellFmt(task, colKey).bold });
   }
 
   function handleSetBgColor(taskId, colKey, color) {
@@ -344,9 +331,52 @@ const ProjectPlan = ({ project, canEdit }) => {
     } catch (e) { toast.error('Failed to delete: ' + (e.message || '')); }
   };
 
-  // ── Paste from Excel ──────────────────────────────────────────────────────────
+  // ── Drag-to-reorder ───────────────────────────────────────────────────────────
+  function handleRowReorder(fromId, toId) {
+    if (!fromId || fromId === toId) { setDragId(null); setDragOverId(null); return; }
+    setTasks(prev => {
+      const fromIdx = prev.findIndex(t => t.id === fromId);
+      const toIdx   = prev.findIndex(t => t.id === toId);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      const next = [...prev];
+      const [removed] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, removed);
+      const reordered = next.map((t, i) => ({ ...t, sort_order: i }));
+      pushHistory(reordered);
+      debouncedSave(reordered);
+      return reordered;
+    });
+    setDragId(null);
+    setDragOverId(null);
+  }
+
+  // ── Load Template ─────────────────────────────────────────────────────────────
+  const handleLoadTemplate = async () => {
+    if (tasks.length > 0 && !window.confirm(`This will append ${PLAN_TEMPLATE.length} template tasks to the existing plan. Continue?`)) return;
+    try {
+      toast('Loading template…', { duration: 2000 });
+      const toInsert = PLAN_TEMPLATE.map((t, i) => ({
+        project_id: project.id,
+        milestone:  t.milestone,
+        activities: t.activities,
+        tools:      t.tools,
+        duration:   t.duration,
+        dependency: t.dependency,
+        status:     'Not Started',
+        sort_order: tasks.length + i,
+      }));
+      const saved = await bulkUpsertPlanTasks(toInsert);
+      const updated = [...tasks, ...saved];
+      setTasks(updated);
+      pushHistory(updated);
+      toast.success(`${saved.length} tasks loaded from template`);
+    } catch (e) {
+      toast.error('Failed to load template: ' + (e.message || ''));
+    }
+  };
+
+  // ── Paste rows from Excel ─────────────────────────────────────────────────────
   const handlePaste = (e) => {
-    // If an input is focused, let browser handle it natively
     if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT') return;
     e.preventDefault();
     const rows = e.clipboardData.getData('text/plain').split('\n').filter(r => r.trim());
@@ -373,13 +403,13 @@ const ProjectPlan = ({ project, canEdit }) => {
   const handleCellSingleClick = (e, taskId, colKey, task, visualIdx) => {
     const col = COLUMNS.find(c => c.key === colKey);
     if (!col) return;
-    // For dropdowns, go straight to edit on single click
+    // Dropdowns go straight to edit on single click
     if (['status', 'owner', 'milestone'].includes(colKey) && isEditable(col, task, visualIdx)) {
       setEditCell({ taskId, col: colKey });
       setSelectedCell(null); setToolbarPos(null);
       return;
     }
-    // Select cell and show format toolbar
+    // Select cell → show format toolbar
     setSelectedCell({ taskId, col: colKey });
     setEditCell(null);
     const rect = e.currentTarget.getBoundingClientRect();
@@ -413,6 +443,17 @@ const ProjectPlan = ({ project, canEdit }) => {
     return map;
   }, [sortedTasks]);
 
+  // ── Frozen column left offsets (cumulative) ───────────────────────────────────
+  const frozenCols = COLUMNS.filter(c => c.frozen  && visibleCols[c.key] !== false);
+  const scrollCols = COLUMNS.filter(c => !c.frozen && visibleCols[c.key] !== false);
+
+  const frozenLeftOffsets = useMemo(() => {
+    const offsets = {};
+    let left = ROW_NUM_W; // start after the row-number column
+    frozenCols.forEach(c => { offsets[c.key] = left; left += c.width; });
+    return offsets;
+  }, [frozenCols]);
+
   // ── Export CSV ────────────────────────────────────────────────────────────────
   const handleExport = () => {
     const visCols = COLUMNS.filter(c => visibleCols[c.key] !== false);
@@ -432,9 +473,7 @@ const ProjectPlan = ({ project, canEdit }) => {
     const isSelected = selectedCell?.taskId === task.id && selectedCell?.col === col.key;
     const isCopied   = copiedCell?.taskId === task.id && copiedCell?.col === col.key;
 
-    const wrapStyle = {
-      ...(fmt.bgColor ? { backgroundColor: fmt.bgColor } : {}),
-    };
+    const wrapStyle = fmt.bgColor ? { backgroundColor: fmt.bgColor } : {};
     const textCls = [
       'text-xs truncate px-0.5',
       fmt.bold ? 'font-bold' : '',
@@ -443,7 +482,7 @@ const ProjectPlan = ({ project, canEdit }) => {
     ].join(' ');
 
     const clickProps = {
-      onClick:    (e) => handleCellSingleClick(e, task.id, col.key, task, visualIdx),
+      onClick:       (e) => handleCellSingleClick(e, task.id, col.key, task, visualIdx),
       onDoubleClick: (e) => handleCellDoubleClick(e, task.id, col.key, task, visualIdx),
     };
 
@@ -482,10 +521,7 @@ const ProjectPlan = ({ project, canEdit }) => {
         </div>
       );
     }
-    if (col.key === 'milestone') {
-      // milestone is rendered separately with color badge — handled in table body
-      return null;
-    }
+    if (col.key === 'milestone') return null; // rendered separately with color badge
     if (col.key === 'tools' && val && val.startsWith('http')) {
       return (
         <div style={wrapStyle} className={isSelected ? 'outline outline-2 outline-blue-500 rounded' : ''}>
@@ -505,8 +541,8 @@ const ProjectPlan = ({ project, canEdit }) => {
     const val = task[col.key];
     const commit = (v) => handleCellChange(task.id, col.key, v);
     const cls = 'w-full px-1.5 py-0.5 border border-blue-400 rounded text-xs focus:outline-none bg-white';
-    if (col.key === 'status') return <select value={val||'Not Started'} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)}>{STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}</select>;
-    if (col.key === 'owner')  return <select value={val||''} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>;
+    if (col.key === 'status')    return <select value={val||'Not Started'} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)}>{STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}</select>;
+    if (col.key === 'owner')     return <select value={val||''} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>;
     if (col.key === 'milestone') return <select value={val||''} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{milestones.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select>;
     if (col.type === 'date') {
       const dv = val ? formatDateInput(typeof val==='string' ? parseDate(val) : val) : '';
@@ -516,15 +552,11 @@ const ProjectPlan = ({ project, canEdit }) => {
     return <input type="text" value={val??''} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)} />;
   };
 
-  // ── Derived state for render ──────────────────────────────────────────────────
-  const frozenCols = COLUMNS.filter(c => c.frozen  && visibleCols[c.key] !== false);
-  const scrollCols = COLUMNS.filter(c => !c.frozen && visibleCols[c.key] !== false);
+  // ── Derived state ─────────────────────────────────────────────────────────────
   const canUndo = histIdxRef.current > 0;
   const canRedo = histIdxRef.current < historyRef.current.length - 1;
-
-  // Format toolbar state for selected cell
-  const selTask  = selectedCell ? tasks.find(t => t.id === selectedCell.taskId) : null;
-  const selFmt   = selTask && selectedCell ? getCellFmt(selTask, selectedCell.col) : null;
+  const selTask = selectedCell ? tasks.find(t => t.id === selectedCell.taskId) : null;
+  const selFmt  = selTask && selectedCell ? getCellFmt(selTask, selectedCell.col) : null;
 
   if (loading) return <div className="text-center py-12 text-slate-500 text-sm">Loading project plan…</div>;
 
@@ -532,14 +564,19 @@ const ProjectPlan = ({ project, canEdit }) => {
     <div className="space-y-3">
       {/* ── Toolbar ── */}
       <div className="flex items-center justify-between bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"><Undo2 size={15} className="text-slate-600"/></button>
           <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)" className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"><Redo2 size={15} className="text-slate-600"/></button>
           <div className="w-px h-4 bg-slate-200 mx-1"/>
           <button onClick={()=>setShowColMenu(v=>!v)} className="px-2.5 py-1 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1.5 transition"><Eye size={13}/> Columns</button>
           <button onClick={handleExport} className="px-2.5 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg flex items-center gap-1.5 transition"><Download size={13}/> Export</button>
+          {isDM && (
+            <button onClick={handleLoadTemplate} className="px-2.5 py-1 text-xs bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-lg flex items-center gap-1.5 border border-purple-200 transition">
+              <ArrowDownToLine size={13}/> Load Template
+            </button>
+          )}
         </div>
-        <p className="text-xs text-slate-400">{tasks.length} rows · click to select · double-click to edit · Ctrl+C/V to copy-paste</p>
+        <p className="text-xs text-slate-400 hidden md:block">{tasks.length} rows · click=select · dbl-click=edit · drag=reorder</p>
       </div>
 
       {/* ── Column toggle ── */}
@@ -567,15 +604,28 @@ const ProjectPlan = ({ project, canEdit }) => {
             {/* Header */}
             <thead className="sticky top-0 z-20">
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="w-8 sticky left-0 z-30 bg-slate-50 border-r border-slate-200 px-2 py-2 text-slate-400 font-medium">#</th>
-                {frozenCols.map(c=>(
-                  <th key={c.key} style={{minWidth:c.width,width:c.width}} className="sticky left-8 z-30 bg-slate-50 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 whitespace-nowrap" onClick={()=>setSortConfig({col:c.key,dir:sortConfig.col===c.key&&sortConfig.dir==='asc'?'desc':'asc'})}>
-                    <div className="flex items-center gap-1">{c.label}<ArrowUpDown size={10} className="opacity-40"/></div>
+                {/* Drag handle col */}
+                <th className="w-6 sticky z-30 bg-slate-50 border-r border-slate-200" style={{ left: 0 }} />
+                {/* Row # */}
+                <th className="w-8 sticky z-30 bg-slate-50 border-r border-slate-200 px-2 py-2 text-slate-400 font-medium" style={{ left: 24 }}>#</th>
+                {/* Frozen cols */}
+                {frozenCols.map(c => (
+                  <th key={c.key}
+                    style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key] + 24 }}
+                    className="sticky z-30 bg-slate-50 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
+                    <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
+                      {c.label}<ArrowUpDown size={10} className="opacity-40"/>
+                    </div>
                   </th>
                 ))}
-                {scrollCols.map(c=>(
-                  <th key={c.key} style={{minWidth:c.width,width:c.width}} className="bg-slate-50 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 whitespace-nowrap" onClick={()=>setSortConfig({col:c.key,dir:sortConfig.col===c.key&&sortConfig.dir==='asc'?'desc':'asc'})}>
-                    <div className="flex items-center gap-1">{c.label}<ArrowUpDown size={10} className="opacity-40"/></div>
+                {/* Scrollable cols */}
+                {scrollCols.map(c => (
+                  <th key={c.key}
+                    style={{ minWidth: c.width, width: c.width }}
+                    className="bg-slate-50 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
+                    <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
+                      {c.label}<ArrowUpDown size={10} className="opacity-40"/>
+                    </div>
                   </th>
                 ))}
                 {isDM && <th className="w-8 bg-slate-50"/>}
@@ -585,15 +635,36 @@ const ProjectPlan = ({ project, canEdit }) => {
             {/* Body */}
             <tbody>
               {sortedTasks.map((task, visualIdx) => {
-                const msKey   = task.milestone || '__none__';
-                const msColor = milestoneColorMap[msKey] || MILESTONE_PALETTE[0];
-                const prevKey = visualIdx > 0 ? (sortedTasks[visualIdx-1].milestone || '__none__') : null;
-                const isNewGroup = visualIdx > 0 && msKey !== prevKey;
+                const msKey    = task.milestone || '__none__';
+                const msColor  = milestoneColorMap[msKey] || MILESTONE_PALETTE[0];
+                const prevKey  = visualIdx > 0 ? (sortedTasks[visualIdx-1].milestone || '__none__') : null;
+                const isNewGroup  = visualIdx > 0 && msKey !== prevKey;
+                const isDragging  = dragId === task.id;
+                const isDragOver  = dragOverId === task.id;
 
                 return (
-                  <tr key={task.id||visualIdx} className={`border-b border-slate-100 hover:bg-slate-50/40 group ${isNewGroup ? msColor.rowTop : ''}`}>
+                  <tr key={task.id||visualIdx}
+                    draggable={isDM}
+                    onDragStart={() => setDragId(task.id)}
+                    onDragOver={e => { e.preventDefault(); setDragOverId(task.id); }}
+                    onDrop={e => { e.preventDefault(); handleRowReorder(dragId, task.id); }}
+                    onDragEnd={() => { setDragId(null); setDragOverId(null); }}
+                    className={[
+                      'border-b border-slate-100 group transition-colors',
+                      isNewGroup    ? msColor.rowTop  : '',
+                      isDragging    ? 'opacity-40'    : 'hover:bg-slate-50/40',
+                      isDragOver    ? 'border-t-2 border-blue-400 bg-blue-50/30' : '',
+                    ].join(' ')}>
+
+                    {/* Drag handle */}
+                    <td className="sticky z-10 bg-white border-r border-slate-100 px-1 py-1.5 text-center group-hover:bg-slate-50/40" style={{ left: 0, width: 24 }}>
+                      {isDM && <GripVertical size={12} className="text-slate-300 cursor-grab active:cursor-grabbing mx-auto opacity-0 group-hover:opacity-100 transition"/>}
+                    </td>
+
                     {/* Row # */}
-                    <td className="sticky left-0 z-10 bg-white border-r border-slate-100 px-2 py-1.5 text-center text-slate-400 font-medium group-hover:bg-slate-50/40">{visualIdx+1}</td>
+                    <td className="sticky z-10 bg-white border-r border-slate-100 px-2 py-1.5 text-center text-slate-400 font-medium group-hover:bg-slate-50/40" style={{ left: 24, width: 32 }}>
+                      {visualIdx + 1}
+                    </td>
 
                     {/* Frozen cells */}
                     {frozenCols.map(c => {
@@ -601,17 +672,18 @@ const ProjectPlan = ({ project, canEdit }) => {
                       const fmt = getCellFmt(task, c.key);
                       const isSelected = selectedCell?.taskId === task.id && selectedCell?.col === c.key;
                       return (
-                        <td key={c.key} style={{minWidth:c.width,width:c.width,...(fmt.bgColor&&!isMsCol?{backgroundColor:fmt.bgColor}:{})}}
-                          className={`sticky left-8 z-10 bg-white border-r border-slate-100 px-2 py-1.5 group-hover:bg-slate-50/40 ${isMsCol?msColor.border:''} ${isSelected&&!isMsCol?'outline-none':''}`}>
-                          {editCell?.taskId===task.id && editCell?.col===c.key
+                        <td key={c.key}
+                          style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key] + 24, ...(fmt.bgColor && !isMsCol ? { backgroundColor: fmt.bgColor } : {}) }}
+                          className={`sticky z-10 bg-white border-r border-slate-100 px-2 py-1.5 group-hover:bg-slate-50/40 ${isMsCol ? msColor.border : ''}`}>
+                          {editCell?.taskId === task.id && editCell?.col === c.key
                             ? renderEditor(c, task)
                             : isMsCol
                               ? <div
-                                  className={`text-xs font-semibold px-1.5 py-0.5 rounded cursor-pointer ${msColor.bg} ${msColor.text} ${isSelected?'outline outline-2 outline-blue-500':''}`}
-                                  onClick={e=>handleCellSingleClick(e,task.id,c.key,task,visualIdx)}
-                                  onDoubleClick={e=>handleCellDoubleClick(e,task.id,c.key,task,visualIdx)}
+                                  className={`text-xs font-semibold px-1.5 py-0.5 rounded cursor-pointer ${msColor.bg} ${msColor.text} ${isSelected ? 'outline outline-2 outline-blue-500' : ''}`}
+                                  onClick={e => handleCellSingleClick(e, task.id, c.key, task, visualIdx)}
+                                  onDoubleClick={e => handleCellDoubleClick(e, task.id, c.key, task, visualIdx)}
                                 >
-                                  {(()=>{const ms=milestones.find(m=>m.id===task.milestone);return ms?.name||task.milestone||<span className="opacity-40">—</span>;})()}
+                                  {(()=>{ const ms = milestones.find(m => m.id === task.milestone); return ms?.name || task.milestone || <span className="opacity-40">—</span>; })()}
                                 </div>
                               : renderViewer(c, task, visualIdx)}
                         </td>
@@ -622,27 +694,29 @@ const ProjectPlan = ({ project, canEdit }) => {
                     {scrollCols.map(c => {
                       const fmt = getCellFmt(task, c.key);
                       return (
-                        <td key={c.key} style={{minWidth:c.width,width:c.width,...(fmt.bgColor?{backgroundColor:fmt.bgColor}:{})}}
+                        <td key={c.key}
+                          style={{ minWidth: c.width, width: c.width, ...(fmt.bgColor ? { backgroundColor: fmt.bgColor } : {}) }}
                           className="border-r border-slate-100 px-2 py-1.5">
-                          {editCell?.taskId===task.id && editCell?.col===c.key
+                          {editCell?.taskId === task.id && editCell?.col === c.key
                             ? renderEditor(c, task)
                             : renderViewer(c, task, visualIdx)}
                         </td>
                       );
                     })}
 
-                    {/* Three-dots */}
+                    {/* Three-dots menu */}
                     {isDM && (
-                      <td className="px-1 py-1.5 relative" onClick={e=>e.stopPropagation()}>
-                        <button onClick={e=>{e.stopPropagation();setOpenMenu(openMenu===task.id?null:task.id);}} className="p-1 rounded hover:bg-slate-200 opacity-0 group-hover:opacity-100 transition">
+                      <td className="px-1 py-1.5 relative" onClick={e => e.stopPropagation()}>
+                        <button onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === task.id ? null : task.id); }}
+                          className="p-1 rounded hover:bg-slate-200 opacity-0 group-hover:opacity-100 transition">
                           <MoreVertical size={13} className="text-slate-500"/>
                         </button>
-                        {openMenu===task.id && (
+                        {openMenu === task.id && (
                           <div className="absolute right-0 top-7 bg-white border border-slate-200 rounded-lg shadow-xl z-50 min-w-[150px] py-1 text-xs">
-                            <button onClick={()=>handleInsertRow(task.id,'above')} className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 flex items-center gap-2"><ArrowUpToLine size={12}/> Insert row above</button>
-                            <button onClick={()=>handleInsertRow(task.id,'below')} className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 flex items-center gap-2"><ArrowDownToLine size={12}/> Insert row below</button>
+                            <button onClick={() => handleInsertRow(task.id, 'above')} className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 flex items-center gap-2"><ArrowUpToLine size={12}/> Insert row above</button>
+                            <button onClick={() => handleInsertRow(task.id, 'below')} className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 flex items-center gap-2"><ArrowDownToLine size={12}/> Insert row below</button>
                             <div className="border-t border-slate-100 my-1"/>
-                            <button onClick={()=>handleDeleteRow(task.id)} className="w-full text-left px-3 py-1.5 text-red-600 hover:bg-red-50 flex items-center gap-2"><Trash2 size={12}/> Delete row</button>
+                            <button onClick={() => handleDeleteRow(task.id)} className="w-full text-left px-3 py-1.5 text-red-600 hover:bg-red-50 flex items-center gap-2"><Trash2 size={12}/> Delete row</button>
                           </div>
                         )}
                       </td>
@@ -651,8 +725,12 @@ const ProjectPlan = ({ project, canEdit }) => {
                 );
               })}
 
-              {sortedTasks.length===0 && (
-                <tr><td colSpan={frozenCols.length+scrollCols.length+2} className="text-center py-14 text-slate-400">No tasks yet. Click "Add Row" to start.</td></tr>
+              {sortedTasks.length === 0 && (
+                <tr>
+                  <td colSpan={frozenCols.length + scrollCols.length + 3} className="text-center py-14 text-slate-400">
+                    No tasks yet — click <strong>Load Template</strong> to start from the standard plan, or <strong>Add Row</strong> to build manually.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
@@ -666,13 +744,24 @@ const ProjectPlan = ({ project, canEdit }) => {
         </button>
       )}
 
-      {/* ── Floating format toolbar (renders outside table to avoid clipping) ── */}
+      {/* ── Floating format + edit toolbar ── */}
       {selectedCell && selTask && toolbarPos && (
         <div data-format-toolbar
           className="fixed z-[9999] bg-white border border-slate-200 rounded-lg shadow-xl flex items-center gap-1 px-2 py-1.5"
           style={{ top: toolbarPos.top, left: toolbarPos.left }}
           onMouseDown={e => e.stopPropagation()}
         >
+          {/* Edit cell button */}
+          <button
+            onClick={() => { setEditCell(selectedCell); setSelectedCell(null); setToolbarPos(null); }}
+            title="Edit cell (double-click or Enter)"
+            className="p-1.5 rounded hover:bg-blue-50 text-blue-600 transition"
+          >
+            <Edit2 size={13}/>
+          </button>
+
+          <div className="w-px h-4 bg-slate-200 mx-0.5"/>
+
           {/* Bold */}
           <button
             onClick={() => handleToggleBold(selectedCell.taskId, selectedCell.col)}
@@ -706,20 +795,22 @@ const ProjectPlan = ({ project, canEdit }) => {
 
           <div className="w-px h-4 bg-slate-200 mx-0.5"/>
 
-          {/* Copy/Paste indicators */}
+          {/* Copy */}
           <button onClick={() => {
             const val = selTask[selectedCell.col] ?? '';
-            navigator.clipboard.writeText(String(val)).catch(()=>{});
+            navigator.clipboard.writeText(String(val)).catch(() => {});
             setCopiedCell({ ...selectedCell, value: val });
             toast.success('Copied', { duration: 1000 });
           }} title="Copy cell (Ctrl+C)" className="p-1.5 rounded hover:bg-slate-100 text-slate-500 transition">
             <Copy size={12}/>
           </button>
+
+          {/* Paste */}
           {copiedCell && (
             <button onClick={() => {
               navigator.clipboard.readText().then(text => {
                 handleCellChange(selectedCell.taskId, selectedCell.col, text.trim());
-              }).catch(()=>{});
+              }).catch(() => {});
             }} title="Paste (Ctrl+V)" className="p-1.5 rounded hover:bg-slate-100 text-slate-500 transition">
               <Clipboard size={12}/>
             </button>
