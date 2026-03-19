@@ -262,6 +262,14 @@ export async function bulkUpsertPlanTasks(tasks) {
   return data || [];
 }
 
+export async function clearPlanTasks(projectId) {
+  const { error } = await supabase
+    .from('project_plan')
+    .delete()
+    .eq('project_id', projectId);
+  if (error) throw error;
+}
+
 // ============================================================
 // SOW
 // ============================================================
