@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Eye, Download, Plus, Trash2, ArrowUpDown, MoreVertical,
   Undo2, Redo2, ArrowDownToLine, ArrowUpToLine, Bold, Copy, Clipboard, Edit2, GripVertical,
@@ -8,7 +9,7 @@ import debounce from 'lodash.debounce';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
   getPlanTasks, bulkUpsertPlanTasks, upsertPlanTask, deletePlanTask,
-  getMilestones, getPeople, clearPlanTasks,
+  getMilestones, getPeople,
 } from '../../../lib/supabase';
 import { STATUS_OPTIONS, PLAN_TEMPLATE } from '../../../lib/templates';
 import { recalculatePlan, getStatusColor } from '../../../lib/calculations';
@@ -81,6 +82,7 @@ const ProjectPlan = ({ project, canEdit }) => {
   const [copiedCell, setCopiedCell]     = useState(null);    // { taskId, col, value }
   const [toolbarPos, setToolbarPos]     = useState(null);    // { top, left }
   const [loading, setLoading]           = useState(true);
+  // { taskId, x, y } — portal-rendered dropdown
   const [openMenu, setOpenMenu]         = useState(null);
 
   // Drag-to-reorder state
@@ -199,7 +201,8 @@ const ProjectPlan = ({ project, canEdit }) => {
   // Close menus/toolbar on outside click
   useEffect(() => {
     const h = (e) => {
-      setOpenMenu(null);
+      // Close the portal row-action menu if clicking outside it
+      if (!e.target.closest('[data-row-menu]')) setOpenMenu(null);
       if (!e.target.closest('[data-plan-table]') && !e.target.closest('[data-format-toolbar]')) {
         setSelectedCell(null); setToolbarPos(null);
       }
@@ -316,7 +319,7 @@ const ProjectPlan = ({ project, canEdit }) => {
       const created = await upsertPlanTask({ project_id: project.id, activities: 'New Activity', status: 'Not Started', duration: 0, sort_order: insertAt });
       const updated = [...tasks]; updated.splice(insertAt, 0, created);
       const reordered = updated.map((t, i) => ({ ...t, sort_order: i }));
-      setTasks(reordered); pushHistory(reordered); setOpenMenu(null);
+      setTasks(reordered); pushHistory(reordered); setOpenMenu(null);  // close portal menu
       toast.success('Row inserted');
     } catch (e) { toast.error('Failed to insert row: ' + (e.message || '')); }
   };
@@ -327,7 +330,7 @@ const ProjectPlan = ({ project, canEdit }) => {
       const task = tasks.find(t => t.id === taskId);
       if (task?.id && !String(task.id).startsWith('temp-')) await deletePlanTask(task.id);
       const updated = tasks.filter(t => t.id !== taskId);
-      setTasks(updated); pushHistory(updated); setOpenMenu(null);
+      setTasks(updated); pushHistory(updated); setOpenMenu(null);  // close portal menu
       toast.success('Row deleted');
     } catch (e) { toast.error('Failed to delete: ' + (e.message || '')); }
   };
@@ -355,9 +358,12 @@ const ProjectPlan = ({ project, canEdit }) => {
   const handleLoadTemplate = async () => {
     if (!window.confirm(`This will replace ALL existing tasks with the ${PLAN_TEMPLATE.length}-task standard template. Continue?`)) return;
     try {
-      toast('Loading template…', { duration: 2500 });
-      // 1. Clear all existing tasks for this project
-      await clearPlanTasks(project.id);
+      toast('Loading template…', { duration: 3000 });
+      // 1. Fetch + delete all existing tasks one-by-one (RLS-safe — same fn used by the UI Delete button)
+      const existing = await getPlanTasks(project.id);
+      if (existing.length > 0) {
+        await Promise.all(existing.map(t => deletePlanTask(t.id)));
+      }
       // 2. Insert template tasks with deterministic sort_order 0 → N-1
       const toInsert = PLAN_TEMPLATE.map((t, i) => ({
         project_id: project.id,
@@ -374,7 +380,7 @@ const ProjectPlan = ({ project, canEdit }) => {
       const fresh = await getPlanTasks(project.id);
       setTasks(fresh);
       pushHistory(fresh);
-      toast.success(`${PLAN_TEMPLATE.length} tasks loaded from template`);
+      toast.success(`${PLAN_TEMPLATE.length} tasks loaded in correct order`);
     } catch (e) {
       toast.error('Failed to load template: ' + (e.message || ''));
     }
@@ -610,14 +616,14 @@ const ProjectPlan = ({ project, canEdit }) => {
             <thead className="sticky top-0 z-20">
               <tr className="bg-slate-50 border-b border-slate-200">
                 {/* Combined action col: drag handle + row menu */}
-                <th className="sticky z-30 bg-slate-50 border-r border-slate-200" style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W }} />
+                <th className="sticky z-30 border-r border-slate-200" style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W, backgroundColor: '#f8fafc' }} />
                 {/* Row # */}
-                <th className="sticky z-30 bg-slate-50 border-r border-slate-200 px-2 py-2 text-slate-400 font-medium" style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W }}>#</th>
+                <th className="sticky z-30 border-r border-slate-200 px-2 py-2 text-slate-400 font-medium" style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W, backgroundColor: '#f8fafc' }}>#</th>
                 {/* Frozen cols */}
                 {frozenCols.map(c => (
                   <th key={c.key}
-                    style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key] }}
-                    className="sticky z-30 bg-slate-50 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
+                    style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key], backgroundColor: '#f8fafc' }}
+                    className="sticky z-30 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
                     <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
                       {c.label}<ArrowUpDown size={10} className="opacity-40"/>
                     </div>
@@ -661,33 +667,30 @@ const ProjectPlan = ({ project, canEdit }) => {
                     ].join(' ')}>
 
                     {/* Combined action col: drag handle + row menu (left side) */}
-                    <td className="sticky z-10 bg-white border-r border-slate-100 group-hover:bg-slate-50"
-                      style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W }}
+                    <td className="sticky z-10 border-r border-slate-100"
+                      style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W, backgroundColor: '#ffffff' }}
                       onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-between px-1 py-1.5">
                         {isDM && <GripVertical size={12} className="text-slate-300 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition flex-shrink-0"/>}
                         {isDM && (
-                          <div className="relative">
-                            <button onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === task.id ? null : task.id); }}
-                              className="p-1 rounded hover:bg-slate-200 opacity-0 group-hover:opacity-100 transition">
-                              <MoreVertical size={12} className="text-slate-500"/>
-                            </button>
-                            {openMenu === task.id && (
-                              <div className="absolute left-0 top-7 bg-white border border-slate-200 rounded-lg shadow-xl z-50 min-w-[155px] py-1 text-xs">
-                                <button onClick={() => handleInsertRow(task.id, 'above')} className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 flex items-center gap-2"><ArrowUpToLine size={12}/> Insert row above</button>
-                                <button onClick={() => handleInsertRow(task.id, 'below')} className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 flex items-center gap-2"><ArrowDownToLine size={12}/> Insert row below</button>
-                                <div className="border-t border-slate-100 my-1"/>
-                                <button onClick={() => handleDeleteRow(task.id)} className="w-full text-left px-3 py-1.5 text-red-600 hover:bg-red-50 flex items-center gap-2"><Trash2 size={12}/> Delete row</button>
-                              </div>
-                            )}
-                          </div>
+                          <button
+                            onMouseDown={e => e.stopPropagation()}
+                            onClick={e => {
+                              e.stopPropagation();
+                              if (openMenu?.taskId === task.id) { setOpenMenu(null); return; }
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setOpenMenu({ taskId: task.id, x: rect.left, y: rect.bottom + 4 });
+                            }}
+                            className="p-1 rounded hover:bg-slate-200 opacity-0 group-hover:opacity-100 transition">
+                            <MoreVertical size={12} className="text-slate-500"/>
+                          </button>
                         )}
                       </div>
                     </td>
 
                     {/* Row # */}
-                    <td className="sticky z-10 bg-white border-r border-slate-100 px-2 py-1.5 text-center text-slate-400 font-medium group-hover:bg-slate-50"
-                      style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W }}>
+                    <td className="sticky z-10 border-r border-slate-100 px-2 py-1.5 text-center text-slate-400 font-medium"
+                      style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W, backgroundColor: '#ffffff' }}>
                       {visualIdx + 1}
                     </td>
 
@@ -698,8 +701,8 @@ const ProjectPlan = ({ project, canEdit }) => {
                       const isSelected = selectedCell?.taskId === task.id && selectedCell?.col === c.key;
                       return (
                         <td key={c.key}
-                          style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key], ...(fmt.bgColor && !isMsCol ? { backgroundColor: fmt.bgColor } : {}) }}
-                          className={`sticky z-10 bg-white border-r border-slate-100 px-2 py-1.5 group-hover:bg-slate-50 ${isMsCol ? msColor.border : ''}`}>
+                          style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key], backgroundColor: (!isMsCol && fmt.bgColor) ? fmt.bgColor : '#ffffff' }}
+                          className={`sticky z-10 border-r border-slate-100 px-2 py-1.5 ${isMsCol ? msColor.border : ''}`}>
                           {editCell?.taskId === task.id && editCell?.col === c.key
                             ? renderEditor(c, task)
                             : isMsCol
@@ -824,6 +827,28 @@ const ProjectPlan = ({ project, canEdit }) => {
             </button>
           )}
         </div>
+      )}
+
+      {/* ── Row action menu — rendered as a portal so it escapes sticky z-index stacking contexts ── */}
+      {openMenu && createPortal(
+        <div
+          data-row-menu
+          style={{ position: 'fixed', top: openMenu.y, left: openMenu.x, zIndex: 99999 }}
+          className="bg-white border border-slate-200 rounded-lg shadow-2xl min-w-[160px] py-1 text-xs"
+          onMouseDown={e => e.stopPropagation()}
+        >
+          <button onClick={() => handleInsertRow(openMenu.taskId, 'above')} className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+            <ArrowUpToLine size={12}/> Insert row above
+          </button>
+          <button onClick={() => handleInsertRow(openMenu.taskId, 'below')} className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+            <ArrowDownToLine size={12}/> Insert row below
+          </button>
+          <div className="border-t border-slate-100 my-1"/>
+          <button onClick={() => handleDeleteRow(openMenu.taskId)} className="w-full text-left px-3 py-2 text-red-600 hover:bg-red-50 flex items-center gap-2">
+            <Trash2 size={12}/> Delete row
+          </button>
+        </div>,
+        document.body
       )}
     </div>
   );
