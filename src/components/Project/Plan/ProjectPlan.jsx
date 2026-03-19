@@ -8,14 +8,15 @@ import debounce from 'lodash.debounce';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
   getPlanTasks, bulkUpsertPlanTasks, upsertPlanTask, deletePlanTask,
-  getMilestones, getPeople,
+  getMilestones, getPeople, clearPlanTasks,
 } from '../../../lib/supabase';
 import { STATUS_OPTIONS, PLAN_TEMPLATE } from '../../../lib/templates';
 import { recalculatePlan, getStatusColor } from '../../../lib/calculations';
 import { calcPlannedEnd, formatDate, formatDateInput, parseDate, networkdays } from '../../../lib/workdays';
 
 // ─── Column definitions ────────────────────────────────────────────────────────
-const ROW_NUM_W = 32; // px width of the leading "#" column
+const ACTION_COL_W = 48; // px width of the combined action column (drag + menu)
+const ROW_NUM_W    = 32; // px width of the leading "#" column
 
 const COLUMNS = [
   { key: 'milestone',              label: 'Milestone',            width: 160, frozen: true,  type: 'milestone' },
@@ -352,9 +353,12 @@ const ProjectPlan = ({ project, canEdit }) => {
 
   // ── Load Template ─────────────────────────────────────────────────────────────
   const handleLoadTemplate = async () => {
-    if (tasks.length > 0 && !window.confirm(`This will append ${PLAN_TEMPLATE.length} template tasks to the existing plan. Continue?`)) return;
+    if (!window.confirm(`This will replace ALL existing tasks with the ${PLAN_TEMPLATE.length}-task standard template. Continue?`)) return;
     try {
-      toast('Loading template…', { duration: 2000 });
+      toast('Loading template…', { duration: 2500 });
+      // 1. Clear all existing tasks for this project
+      await clearPlanTasks(project.id);
+      // 2. Insert template tasks with deterministic sort_order 0 → N-1
       const toInsert = PLAN_TEMPLATE.map((t, i) => ({
         project_id: project.id,
         milestone:  t.milestone,
@@ -363,10 +367,10 @@ const ProjectPlan = ({ project, canEdit }) => {
         duration:   t.duration,
         dependency: t.dependency,
         status:     'Not Started',
-        sort_order: tasks.length + i,
+        sort_order: i,
       }));
       await bulkUpsertPlanTasks(toInsert);
-      // Re-fetch from DB so tasks come back in sort_order (Supabase upsert response order is not guaranteed)
+      // 3. Re-fetch ordered by sort_order (upsert response order is not guaranteed)
       const fresh = await getPlanTasks(project.id);
       setTasks(fresh);
       pushHistory(fresh);
@@ -450,7 +454,7 @@ const ProjectPlan = ({ project, canEdit }) => {
 
   const frozenLeftOffsets = useMemo(() => {
     const offsets = {};
-    let left = ROW_NUM_W; // start after the row-number column
+    let left = ACTION_COL_W + ROW_NUM_W; // 48 (action col) + 32 (row#) = 80
     frozenCols.forEach(c => { offsets[c.key] = left; left += c.width; });
     return offsets;
   }, [frozenCols]);
@@ -605,14 +609,14 @@ const ProjectPlan = ({ project, canEdit }) => {
             {/* Header */}
             <thead className="sticky top-0 z-20">
               <tr className="bg-slate-50 border-b border-slate-200">
-                {/* Drag handle col */}
-                <th className="w-6 sticky z-30 bg-slate-50 border-r border-slate-200" style={{ left: 0 }} />
+                {/* Combined action col: drag handle + row menu */}
+                <th className="sticky z-30 bg-slate-50 border-r border-slate-200" style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W }} />
                 {/* Row # */}
-                <th className="w-8 sticky z-30 bg-slate-50 border-r border-slate-200 px-2 py-2 text-slate-400 font-medium" style={{ left: 24 }}>#</th>
+                <th className="sticky z-30 bg-slate-50 border-r border-slate-200 px-2 py-2 text-slate-400 font-medium" style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W }}>#</th>
                 {/* Frozen cols */}
                 {frozenCols.map(c => (
                   <th key={c.key}
-                    style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key] + 24 }}
+                    style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key] }}
                     className="sticky z-30 bg-slate-50 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
                     <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
                       {c.label}<ArrowUpDown size={10} className="opacity-40"/>
@@ -629,7 +633,6 @@ const ProjectPlan = ({ project, canEdit }) => {
                     </div>
                   </th>
                 ))}
-                {isDM && <th className="w-8 bg-slate-50"/>}
               </tr>
             </thead>
 
@@ -657,13 +660,34 @@ const ProjectPlan = ({ project, canEdit }) => {
                       isDragOver    ? 'border-t-2 border-blue-400 bg-blue-50/30' : '',
                     ].join(' ')}>
 
-                    {/* Drag handle */}
-                    <td className="sticky z-10 bg-white border-r border-slate-100 px-1 py-1.5 text-center group-hover:bg-slate-50/40" style={{ left: 0, width: 24 }}>
-                      {isDM && <GripVertical size={12} className="text-slate-300 cursor-grab active:cursor-grabbing mx-auto opacity-0 group-hover:opacity-100 transition"/>}
+                    {/* Combined action col: drag handle + row menu (left side) */}
+                    <td className="sticky z-10 bg-white border-r border-slate-100 group-hover:bg-slate-50"
+                      style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W }}
+                      onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center justify-between px-1 py-1.5">
+                        {isDM && <GripVertical size={12} className="text-slate-300 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition flex-shrink-0"/>}
+                        {isDM && (
+                          <div className="relative">
+                            <button onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === task.id ? null : task.id); }}
+                              className="p-1 rounded hover:bg-slate-200 opacity-0 group-hover:opacity-100 transition">
+                              <MoreVertical size={12} className="text-slate-500"/>
+                            </button>
+                            {openMenu === task.id && (
+                              <div className="absolute left-0 top-7 bg-white border border-slate-200 rounded-lg shadow-xl z-50 min-w-[155px] py-1 text-xs">
+                                <button onClick={() => handleInsertRow(task.id, 'above')} className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 flex items-center gap-2"><ArrowUpToLine size={12}/> Insert row above</button>
+                                <button onClick={() => handleInsertRow(task.id, 'below')} className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 flex items-center gap-2"><ArrowDownToLine size={12}/> Insert row below</button>
+                                <div className="border-t border-slate-100 my-1"/>
+                                <button onClick={() => handleDeleteRow(task.id)} className="w-full text-left px-3 py-1.5 text-red-600 hover:bg-red-50 flex items-center gap-2"><Trash2 size={12}/> Delete row</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </td>
 
                     {/* Row # */}
-                    <td className="sticky z-10 bg-white border-r border-slate-100 px-2 py-1.5 text-center text-slate-400 font-medium group-hover:bg-slate-50/40" style={{ left: 24, width: 32 }}>
+                    <td className="sticky z-10 bg-white border-r border-slate-100 px-2 py-1.5 text-center text-slate-400 font-medium group-hover:bg-slate-50"
+                      style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W }}>
                       {visualIdx + 1}
                     </td>
 
@@ -674,8 +698,8 @@ const ProjectPlan = ({ project, canEdit }) => {
                       const isSelected = selectedCell?.taskId === task.id && selectedCell?.col === c.key;
                       return (
                         <td key={c.key}
-                          style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key] + 24, ...(fmt.bgColor && !isMsCol ? { backgroundColor: fmt.bgColor } : {}) }}
-                          className={`sticky z-10 bg-white border-r border-slate-100 px-2 py-1.5 group-hover:bg-slate-50/40 ${isMsCol ? msColor.border : ''}`}>
+                          style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key], ...(fmt.bgColor && !isMsCol ? { backgroundColor: fmt.bgColor } : {}) }}
+                          className={`sticky z-10 bg-white border-r border-slate-100 px-2 py-1.5 group-hover:bg-slate-50 ${isMsCol ? msColor.border : ''}`}>
                           {editCell?.taskId === task.id && editCell?.col === c.key
                             ? renderEditor(c, task)
                             : isMsCol
@@ -705,30 +729,13 @@ const ProjectPlan = ({ project, canEdit }) => {
                       );
                     })}
 
-                    {/* Three-dots menu */}
-                    {isDM && (
-                      <td className="px-1 py-1.5 relative" onClick={e => e.stopPropagation()}>
-                        <button onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === task.id ? null : task.id); }}
-                          className="p-1 rounded hover:bg-slate-200 opacity-0 group-hover:opacity-100 transition">
-                          <MoreVertical size={13} className="text-slate-500"/>
-                        </button>
-                        {openMenu === task.id && (
-                          <div className="absolute right-0 top-7 bg-white border border-slate-200 rounded-lg shadow-xl z-50 min-w-[150px] py-1 text-xs">
-                            <button onClick={() => handleInsertRow(task.id, 'above')} className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 flex items-center gap-2"><ArrowUpToLine size={12}/> Insert row above</button>
-                            <button onClick={() => handleInsertRow(task.id, 'below')} className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 flex items-center gap-2"><ArrowDownToLine size={12}/> Insert row below</button>
-                            <div className="border-t border-slate-100 my-1"/>
-                            <button onClick={() => handleDeleteRow(task.id)} className="w-full text-left px-3 py-1.5 text-red-600 hover:bg-red-50 flex items-center gap-2"><Trash2 size={12}/> Delete row</button>
-                          </div>
-                        )}
-                      </td>
-                    )}
                   </tr>
                 );
               })}
 
               {sortedTasks.length === 0 && (
                 <tr>
-                  <td colSpan={frozenCols.length + scrollCols.length + 3} className="text-center py-14 text-slate-400">
+                  <td colSpan={frozenCols.length + scrollCols.length + 2} className="text-center py-14 text-slate-400">
                     No tasks yet — click <strong>Load Template</strong> to start from the standard plan, or <strong>Add Row</strong> to build manually.
                   </td>
                 </tr>
