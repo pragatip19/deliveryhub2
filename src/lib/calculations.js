@@ -116,14 +116,14 @@ export function calculateTask(task, allTasks) {
     result.status = 'Done';
   }
 
-  // 5. No of Days Delay
-  result.no_of_days_delay = calcDaysDelay(result);
+  // 5. Days Delay  (field key must match COLUMNS definition: 'days_delay')
+  result.days_delay = calcDaysDelay(result);
 
-  // 6. Delay / On Track
-  result.delay_on_track = calcDelayOnTrack(result);
+  // 6. Delay / On Track  (field key must match COLUMNS definition: 'delay_status')
+  result.delay_status = calcDelayOnTrack(result);
 
-  // 7. Planned Start - Baseline Planned Start
-  result.planned_start_vs_baseline = calcVsBaseline(result);
+  // 7. Baseline Delta  (field key must match COLUMNS definition: 'baseline_delta')
+  result.baseline_delta = calcVsBaseline(result);
 
   return result;
 }
@@ -164,7 +164,7 @@ export function calcDaysDelay(task) {
 // DELAY / ON TRACK
 // ============================================================
 export function calcDelayOnTrack(task) {
-  const delay = task.no_of_days_delay || 0;
+  const delay = task.days_delay || 0;
   const status = task.status;
   if (status === 'Not Applicable' || status === 'Blocked') return '';
   if (status === 'Not Started') return delay > 0 ? 'Delay' : '';
@@ -423,8 +423,10 @@ export function recalcAllDatesFromAnchor(tasks, anchorStart) {
     };
   }
 
-  // Return in ORIGINAL task array order (preserves sort_order)
-  return tasks.map(t => calculated[t.id] || t);
+  // Always return sorted by sort_order — deterministic, prevents state drift
+  return tasks
+    .map(t => calculated[t.id] || t)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 }
 
 // ============================================================
@@ -462,5 +464,8 @@ export function recalculatePlan(tasks) {
     calculated[task.id] = updated;
   });
 
-  return tasks.map(t => calculated[t.id] || t);
+  // Always sort by sort_order on the way out — prevents any state ordering drift
+  return tasks
+    .map(t => calculated[t.id] || t)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 }

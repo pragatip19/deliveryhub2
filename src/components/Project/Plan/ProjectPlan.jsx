@@ -482,12 +482,20 @@ const ProjectPlan = ({ project, canEdit }) => {
   };
 
   // ── Sort ──────────────────────────────────────────────────────────────────────
+  // Default: always sort by sort_order (the user's defined row sequence).
+  // Column-header sort is a temporary view — sort_order is the tiebreaker.
   const sortedTasks = useMemo(() => {
-    if (!sortConfig.col) return tasks;
+    if (!sortConfig.col) {
+      return [...tasks].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    }
     return [...tasks].sort((a, b) => {
-      const av = a[sortConfig.col] || '', bv = b[sortConfig.col] || '';
-      const cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv));
-      return sortConfig.dir === 'asc' ? cmp : -cmp;
+      const av = a[sortConfig.col] ?? '', bv = b[sortConfig.col] ?? '';
+      const cmp = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv));
+      const primary = sortConfig.dir === 'asc' ? cmp : -cmp;
+      // sort_order as tiebreaker so equal-value rows stay in defined sequence
+      return primary !== 0 ? primary : (a.sort_order ?? 0) - (b.sort_order ?? 0);
     });
   }, [tasks, sortConfig]);
 
