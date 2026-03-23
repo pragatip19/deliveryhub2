@@ -666,8 +666,36 @@ const ProjectPlan = ({ project, canEdit }) => {
       };
       return <input type="date" defaultValue={dv} onBlur={onDateBlur} onKeyDown={onDateEnter} className={cls} autoFocus />;
     }
-    if (col.type === 'number') return <input type="number" value={val??''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus min={0} onBlur={()=>setEditCell(null)} />;
-    return <input type="text" value={val??''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)} />;
+    // Number + text inputs: UNCONTROLLED (defaultValue) so that handleCellChange
+    // is NOT called on every keystroke — prevents recalculation/re-render/scroll-jump
+    // while the user is still typing.  Commit fires only on blur or Enter.
+    {
+      const origVal = String(val ?? '');
+      // Mutable flag shared between both closures — set to true by Escape so
+      // that the blur which fires when the input unmounts does NOT commit.
+      const skipCommit = { current: false };
+
+      const onCommitBlur = (e) => {
+        if (skipCommit.current) return;
+        const newVal = e.target.value;
+        if (newVal !== origVal) commit(newVal); else setEditCell(null);
+      };
+      const onCommitKeyDown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault(); e.stopPropagation();
+          e.target.blur();   // triggers onCommitBlur → commit if value changed
+          const st  = sortedTasksRef.current;
+          const idx = st.findIndex(t => t.id === task.id);
+          if (idx >= 0 && idx < st.length - 1) setSelectedCell({ taskId: st[idx + 1].id, col: col.key });
+        } else if (e.key === 'Escape') {
+          skipCommit.current = true;
+          setEditCell(null);
+        }
+      };
+
+      if (col.type === 'number') return <input type="number" defaultValue={origVal} onBlur={onCommitBlur} onKeyDown={onCommitKeyDown} className={cls} autoFocus min={0} />;
+      return <input type="text" defaultValue={origVal} onBlur={onCommitBlur} onKeyDown={onCommitKeyDown} className={cls} autoFocus />;
+    }
   };
 
   // ── Derived state ─────────────────────────────────────────────────────────────
