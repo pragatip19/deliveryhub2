@@ -355,6 +355,79 @@ export function getProjectedGoLive(tasks) {
 }
 
 // ============================================================
+// RECALCULATE ALL DATES FROM ANCHOR (pure chain — no today-comparison)
+// ============================================================
+/**
+ * Given the anchor planned_start for the first task, cascade planned dates
+ * through the entire dependency chain using only durations and working days.
+ * No comparison to today — pure forward calculation.
+ * Also sets baseline_planned_start and baseline_planned_end to match.
+ *
+ * @param {Array}        tasks       — full task array in sort_order
+ * @param {string|Date}  anchorStart — planned_start of the anchor (first) task
+ * @returns tasks array in ORIGINAL order with updated planned + baseline dates
+ */
+export function recalcAllDatesFromAnchor(tasks, anchorStart) {
+  if (!tasks.length || !anchorStart) return tasks;
+
+  const anchor = typeof anchorStart === 'string' ? parseDate(anchorStart) : new Date(anchorStart);
+  if (!anchor) return tasks;
+  anchor.setHours(0, 0, 0, 0);
+
+  // Map activity name → task for dependency lookups
+  const byName = {};
+  tasks.forEach(t => { if (t.activities?.trim()) byName[t.activities.trim()] = t; });
+
+  // Topological sort (visit predecessor before successor)
+  const visited = new Set();
+  const order   = [];
+  function visit(task) {
+    if (!task || visited.has(task.id)) return;
+    const dep = task.dependency?.trim();
+    if (dep && byName[dep]) visit(byName[dep]);
+    visited.add(task.id);
+    order.push(task);
+  }
+  tasks.forEach(t => visit(t));
+
+  // Forward-calculate dates in topo order
+  const calculated = {};
+  for (const task of order) {
+    const dep     = task.dependency?.trim();
+    const predCal = dep ? calculated[byName[dep]?.id] : null;
+
+    let ps;
+    if (predCal?.planned_end) {
+      const predEnd = parseDate(predCal.planned_end);
+      ps = predEnd ? addWorkdays(predEnd, 1) : new Date(anchor);
+    } else {
+      ps = new Date(anchor);   // no predecessor → start at anchor
+    }
+    ps.setHours(0, 0, 0, 0);
+
+    const duration = Math.max(1, task.duration || 1);
+    const pe = calcPlannedEnd(ps, duration);
+
+    const psStr = ps.toISOString().split('T')[0];
+    const peStr = pe  ? pe.toISOString().split('T')[0] : psStr;
+
+    // Only overwrite baseline if it hasn't been explicitly locked by the user
+    const baselineAlreadyLocked = task.baseline_locked === true;
+    calculated[task.id] = {
+      ...task,
+      planned_start:          psStr,
+      planned_end:            peStr,
+      baseline_planned_start: baselineAlreadyLocked ? task.baseline_planned_start : psStr,
+      baseline_planned_end:   baselineAlreadyLocked ? task.baseline_planned_end   : peStr,
+      planned_start_locked:   false,
+    };
+  }
+
+  // Return in ORIGINAL task array order (preserves sort_order)
+  return tasks.map(t => calculated[t.id] || t);
+}
+
+// ============================================================
 // RECALCULATE ENTIRE PLAN (topological sort by dependency)
 // ============================================================
 export function recalculatePlan(tasks) {

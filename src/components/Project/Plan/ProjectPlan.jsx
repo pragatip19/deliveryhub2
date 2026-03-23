@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Eye, Download, Plus, Trash2, ArrowUpDown, MoreVertical,
   Undo2, Redo2, ArrowDownToLine, ArrowUpToLine, Bold, Copy, Clipboard, Edit2, GripVertical,
+  Lock, LockOpen,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import debounce from 'lodash.debounce';
@@ -12,7 +13,7 @@ import {
   getMilestones, getPeople,
 } from '../../../lib/supabase';
 import { STATUS_OPTIONS, PLAN_TEMPLATE } from '../../../lib/templates';
-import { recalculatePlan, getStatusColor } from '../../../lib/calculations';
+import { recalculatePlan, recalcAllDatesFromAnchor, getStatusColor } from '../../../lib/calculations';
 import { calcPlannedEnd, formatDate, formatDateInput, parseDate, networkdays } from '../../../lib/workdays';
 
 // ─── Column definitions ────────────────────────────────────────────────────────
@@ -26,9 +27,9 @@ const COLUMNS = [
   { key: 'owner',                  label: 'Owner',                width: 150, frozen: false, type: 'people' },
   { key: 'status',                 label: 'Status',               width: 130, frozen: false, type: 'status' },
   { key: 'duration',               label: 'Duration',             width: 80,  frozen: false, type: 'number' },
-  { key: 'baseline_planned_start', label: 'Baseline Start',       width: 130, frozen: false, type: 'date', adminOnly: true },
-  { key: 'baseline_planned_end',   label: 'Baseline End',         width: 130, frozen: false, type: 'date', adminOnly: true },
-  { key: 'planned_start',          label: 'Planned Start',        width: 120, frozen: false, type: 'date', specialEdit: true },
+  { key: 'baseline_planned_start', label: 'Baseline Start',       width: 130, frozen: false, type: 'date', readOnly: true },
+  { key: 'baseline_planned_end',   label: 'Baseline End',         width: 130, frozen: false, type: 'date', readOnly: true },
+  { key: 'planned_start',          label: 'Planned Start',        width: 120, frozen: false, type: 'date', anchorOnly: true },
   { key: 'planned_end',            label: 'Planned End',          width: 120, frozen: false, type: 'date', readOnly: true },
   { key: 'actual_start',           label: 'Actual Start',         width: 120, frozen: false, type: 'date' },
   { key: 'current_end',            label: 'Current End',          width: 120, frozen: false, type: 'date' },
@@ -80,7 +81,6 @@ const ProjectPlan = ({ project, canEdit }) => {
   const [selectedCell, setSelectedCell] = useState(null);   // { taskId, col }
   const [editCell, setEditCell]         = useState(null);    // { taskId, col }
   const [copiedCell, setCopiedCell]     = useState(null);    // { taskId, col, value }
-  const [toolbarPos, setToolbarPos]     = useState(null);    // { top, left }
   const [loading, setLoading]           = useState(true);
   // { taskId, x, y } — portal-rendered dropdown
   const [openMenu, setOpenMenu]         = useState(null);
@@ -93,6 +93,8 @@ const ProjectPlan = ({ project, canEdit }) => {
   const historyRef    = useRef([]);
   const histIdxRef    = useRef(-1);
   const isUndoRedoRef = useRef(false);
+  // Ref to sortedTasks — used by the keyboard handler (Enter → next row)
+  const sortedTasksRef = useRef([]);
 
   // ── Load ─────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -186,10 +188,23 @@ const ProjectPlan = ({ project, canEdit }) => {
           setEditCell(selectedCell);
           return;
         }
-        if (e.key === 'Escape') { setSelectedCell(null); setToolbarPos(null); }
+        if (e.key === 'Escape') { setSelectedCell(null); }
         if (e.key === 'Delete' || e.key === 'Backspace') {
           const col = COLUMNS.find(c => c.key === selectedCell.col);
-          if (col && !col.readOnly) handleCellChange(selectedCell.taskId, selectedCell.col, '');
+          if (col && !col.readOnly && !col.anchorOnly) handleCellChange(selectedCell.taskId, selectedCell.col, '');
+        }
+        // Arrow-down / Enter moves selection to next row (same column)
+        if (e.key === 'ArrowDown' || e.key === 'Enter') {
+          e.preventDefault();
+          const st = sortedTasksRef.current;
+          const cur = st.findIndex(t => t.id === selectedCell.taskId);
+          if (cur >= 0 && cur < st.length - 1) setSelectedCell({ taskId: st[cur + 1].id, col: selectedCell.col });
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          const st = sortedTasksRef.current;
+          const cur = st.findIndex(t => t.id === selectedCell.taskId);
+          if (cur > 0) setSelectedCell({ taskId: st[cur - 1].id, col: selectedCell.col });
         }
       }
       if (editCell && e.key === 'Escape') { setEditCell(null); }
@@ -204,7 +219,7 @@ const ProjectPlan = ({ project, canEdit }) => {
       // Close the portal row-action menu if clicking outside it
       if (!e.target.closest('[data-row-menu]')) setOpenMenu(null);
       if (!e.target.closest('[data-plan-table]') && !e.target.closest('[data-format-toolbar]')) {
-        setSelectedCell(null); setToolbarPos(null);
+        setSelectedCell(null);
       }
     };
     document.addEventListener('mousedown', h);
@@ -216,10 +231,19 @@ const ProjectPlan = ({ project, canEdit }) => {
     setTasks(prev => {
       const idx = prev.findIndex(t => t.id === taskId);
       if (idx === -1) return prev;
+
+      // ── ANCHOR planned_start changed → cascade ALL planned + baseline dates ──
+      if (colKey === 'planned_start' && prev[idx].sort_order === 0 && value) {
+        const cascaded = recalcAllDatesFromAnchor(prev, value);
+        pushHistory(cascaded);
+        debouncedSave(cascaded);
+        return cascaded;
+      }
+
       const next = [...prev];
       const task = { ...next[idx] };
 
-      if (['planned_start','planned_end','baseline_planned_start','baseline_planned_end','actual_start','current_end'].includes(colKey)) {
+      if (['actual_start','current_end'].includes(colKey)) {
         task[colKey] = value || null;
       } else if (colKey === 'duration') {
         task[colKey] = parseInt(value) || 0;
@@ -229,19 +253,10 @@ const ProjectPlan = ({ project, canEdit }) => {
 
       // Auto-status
       if (colKey === 'actual_start' && value && (task.status === 'Not Started' || !task.status)) {
-        task.status = 'In Progress'; task.planned_start_locked = true;
+        task.status = 'In Progress';
       }
       if (colKey === 'current_end' && value) { task.status = 'Done'; }
 
-      // Baseline auto-copy
-      if (colKey === 'planned_start' && value && !task.baseline_planned_start) {
-        task.baseline_planned_start = value; task.baseline_locked = true;
-      }
-      // Recalc planned_end
-      if ((colKey === 'planned_start' || colKey === 'duration') && task.planned_start && task.duration) {
-        const pe = calcPlannedEnd(task.planned_start, task.duration);
-        if (pe) task.planned_end = typeof pe === 'string' ? pe : pe?.toISOString?.().split('T')[0] ?? pe;
-      }
       // Recalc delay
       if (task.planned_end && task.current_end) {
         const delay = networkdays(parseDate(task.planned_end), parseDate(task.current_end));
@@ -250,7 +265,19 @@ const ProjectPlan = ({ project, canEdit }) => {
       }
 
       next[idx] = task;
-      const final = ['dependency','duration','status','planned_start'].includes(colKey)
+
+      // ── Activity name changed → auto-update all dependency references ────────
+      if (colKey === 'activities' && value !== prev[idx].activities) {
+        const oldName = prev[idx].activities || '';
+        const withDepsUpdated = next.map(t =>
+          t.id !== taskId && t.dependency === oldName ? { ...t, dependency: value } : t
+        );
+        const final = recalculatePlan(withDepsUpdated);
+        pushHistory(final); debouncedSave(final);
+        return final;
+      }
+
+      const final = ['dependency','duration','status'].includes(colKey)
         ? recalculatePlan(next) : next;
       pushHistory(final); debouncedSave(final);
       return final;
@@ -386,6 +413,28 @@ const ProjectPlan = ({ project, canEdit }) => {
     }
   };
 
+  // ── Lock / Unlock Baseline ────────────────────────────────────────────────────
+  const isBaselineLocked = tasks.length > 0 && tasks.every(t => t.baseline_locked === true);
+
+  const handleLockBaseline = () => {
+    if (!window.confirm('Lock baseline? Current planned dates will be frozen as the baseline. Future anchor changes will only update planned dates, not baseline.')) return;
+    const locked = tasks.map(t => ({
+      ...t,
+      baseline_planned_start: t.planned_start || t.baseline_planned_start,
+      baseline_planned_end:   t.planned_end   || t.baseline_planned_end,
+      baseline_locked:        true,
+    }));
+    setTasks(locked); pushHistory(locked); debouncedSave(locked);
+    toast.success('Baseline locked');
+  };
+
+  const handleUnlockBaseline = () => {
+    if (!window.confirm('Unlock baseline? It will be overwritten the next time the anchor date is changed.')) return;
+    const unlocked = tasks.map(t => ({ ...t, baseline_locked: false }));
+    setTasks(unlocked); pushHistory(unlocked); debouncedSave(unlocked);
+    toast('Baseline unlocked');
+  };
+
   // ── Paste rows from Excel ─────────────────────────────────────────────────────
   const handlePaste = (e) => {
     if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT') return;
@@ -402,36 +451,34 @@ const ProjectPlan = ({ project, canEdit }) => {
   };
 
   // ── Editability ───────────────────────────────────────────────────────────────
-  const isEditable = (col, task, visualIdx) => {
+  const isEditable = (col, task) => {
     if (!canEdit) return false;
     if (col.readOnly) return false;
-    if (col.adminOnly) return isProjectAdmin;
-    if (col.specialEdit) return isProjectAdmin || (isDM && (visualIdx === 0 || !task.planned_start_locked));
+    // planned_start: admin OR DM, but only for the anchor task (sort_order 0)
+    if (col.anchorOnly) return isDM && (task.sort_order === 0);
     return isDM;
   };
 
   // ── Cell click handlers ───────────────────────────────────────────────────────
-  const handleCellSingleClick = (e, taskId, colKey, task, visualIdx) => {
+  const handleCellSingleClick = (e, taskId, colKey, task) => {
     const col = COLUMNS.find(c => c.key === colKey);
     if (!col) return;
     // Dropdowns go straight to edit on single click
-    if (['status', 'owner', 'milestone'].includes(colKey) && isEditable(col, task, visualIdx)) {
+    if (['status', 'owner', 'milestone'].includes(colKey) && isEditable(col, task)) {
       setEditCell({ taskId, col: colKey });
-      setSelectedCell(null); setToolbarPos(null);
+      setSelectedCell(null);
       return;
     }
-    // Select cell → show format toolbar
+    // Select cell → highlight it (format toolbar is in top bar, not floating)
     setSelectedCell({ taskId, col: colKey });
     setEditCell(null);
-    const rect = e.currentTarget.getBoundingClientRect();
-    setToolbarPos({ top: rect.top + window.scrollY - 42, left: Math.max(4, rect.left + window.scrollX) });
   };
 
-  const handleCellDoubleClick = (e, taskId, colKey, task, visualIdx) => {
+  const handleCellDoubleClick = (e, taskId, colKey, task) => {
     const col = COLUMNS.find(c => c.key === colKey);
-    if (!col || !isEditable(col, task, visualIdx)) return;
+    if (!col || !isEditable(col, task)) return;
     setEditCell({ taskId, col: colKey });
-    setSelectedCell(null); setToolbarPos(null);
+    setSelectedCell(null);
   };
 
   // ── Sort ──────────────────────────────────────────────────────────────────────
@@ -443,6 +490,9 @@ const ProjectPlan = ({ project, canEdit }) => {
       return sortConfig.dir === 'asc' ? cmp : -cmp;
     });
   }, [tasks, sortConfig]);
+
+  // Keep ref in sync so keyboard Enter-navigation can read latest sortedTasks
+  useEffect(() => { sortedTasksRef.current = sortedTasks; }, [sortedTasks]);
 
   // ── Milestone color map ───────────────────────────────────────────────────────
   const milestoneColorMap = useMemo(() => {
@@ -493,8 +543,8 @@ const ProjectPlan = ({ project, canEdit }) => {
     ].join(' ');
 
     const clickProps = {
-      onClick:       (e) => handleCellSingleClick(e, task.id, col.key, task, visualIdx),
-      onDoubleClick: (e) => handleCellDoubleClick(e, task.id, col.key, task, visualIdx),
+      onClick:       (e) => handleCellSingleClick(e, task.id, col.key, task),
+      onDoubleClick: (e) => handleCellDoubleClick(e, task.id, col.key, task),
     };
 
     if (col.key === 'status') {
@@ -552,15 +602,28 @@ const ProjectPlan = ({ project, canEdit }) => {
     const val = task[col.key];
     const commit = (v) => handleCellChange(task.id, col.key, v);
     const cls = 'w-full px-1.5 py-0.5 border border-blue-400 rounded text-xs focus:outline-none bg-white';
-    if (col.key === 'status')    return <select value={val||'Not Started'} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)}>{STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}</select>;
-    if (col.key === 'owner')     return <select value={val||''} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>;
-    if (col.key === 'milestone') return <select value={val||''} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{milestones.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select>;
+
+    // Enter key → commit and move selection to next row (Google Sheets behaviour)
+    const onEnterKey = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        setEditCell(null);
+        const st  = sortedTasksRef.current;
+        const idx = st.findIndex(t => t.id === task.id);
+        if (idx >= 0 && idx < st.length - 1) setSelectedCell({ taskId: st[idx + 1].id, col: col.key });
+      }
+    };
+
+    if (col.key === 'status')    return <select value={val||'Not Started'} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}>{STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}</select>;
+    if (col.key === 'owner')     return <select value={val||''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>;
+    if (col.key === 'milestone') return <select value={val||''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{milestones.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select>;
     if (col.type === 'date') {
       const dv = val ? formatDateInput(typeof val==='string' ? parseDate(val) : val) : '';
-      return <input type="date" value={dv} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)} />;
+      return <input type="date" value={dv} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)} />;
     }
-    if (col.type === 'number') return <input type="number" value={val??''} onChange={e=>commit(e.target.value)} className={cls} autoFocus min={0} onBlur={()=>setEditCell(null)} />;
-    return <input type="text" value={val??''} onChange={e=>commit(e.target.value)} className={cls} autoFocus onBlur={()=>setEditCell(null)} />;
+    if (col.type === 'number') return <input type="number" value={val??''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus min={0} onBlur={()=>setEditCell(null)} />;
+    return <input type="text" value={val??''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)} />;
   };
 
   // ── Derived state ─────────────────────────────────────────────────────────────
@@ -574,20 +637,111 @@ const ProjectPlan = ({ project, canEdit }) => {
   return (
     <div className="space-y-3">
       {/* ── Toolbar ── */}
-      <div className="flex items-center justify-between bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"><Undo2 size={15} className="text-slate-600"/></button>
-          <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)" className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"><Redo2 size={15} className="text-slate-600"/></button>
-          <div className="w-px h-4 bg-slate-200 mx-1"/>
-          <button onClick={()=>setShowColMenu(v=>!v)} className="px-2.5 py-1 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1.5 transition"><Eye size={13}/> Columns</button>
-          <button onClick={handleExport} className="px-2.5 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg flex items-center gap-1.5 transition"><Download size={13}/> Export</button>
-          {isDM && (
-            <button onClick={handleLoadTemplate} className="px-2.5 py-1 text-xs bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-lg flex items-center gap-1.5 border border-purple-200 transition">
-              <ArrowDownToLine size={13}/> Load Template
-            </button>
-          )}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm" data-format-toolbar>
+        {/* Row 1: main actions */}
+        <div className="flex items-center justify-between px-4 py-2.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"><Undo2 size={15} className="text-slate-600"/></button>
+            <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)" className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"><Redo2 size={15} className="text-slate-600"/></button>
+            <div className="w-px h-4 bg-slate-200 mx-1"/>
+            <button onClick={()=>setShowColMenu(v=>!v)} className="px-2.5 py-1 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1.5 transition"><Eye size={13}/> Columns</button>
+            <button onClick={handleExport} className="px-2.5 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg flex items-center gap-1.5 transition"><Download size={13}/> Export</button>
+            {isDM && (
+              <button onClick={handleLoadTemplate} className="px-2.5 py-1 text-xs bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-lg flex items-center gap-1.5 border border-purple-200 transition">
+                <ArrowDownToLine size={13}/> Load Template
+              </button>
+            )}
+            {isDM && tasks.length > 0 && (
+              isBaselineLocked
+                ? <button onClick={handleUnlockBaseline} title="Baseline is locked — click to unlock" className="px-2.5 py-1 text-xs bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg flex items-center gap-1.5 border border-amber-200 transition">
+                    <LockOpen size={13}/> Unlock Baseline
+                  </button>
+                : <button onClick={handleLockBaseline} title="Freeze current planned dates as baseline" className="px-2.5 py-1 text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg flex items-center gap-1.5 border border-emerald-200 transition">
+                    <Lock size={13}/> Lock Baseline
+                  </button>
+            )}
+          </div>
+          <p className="text-xs text-slate-400 hidden md:block">{tasks.length} rows · click=select · dbl-click=edit · drag=reorder</p>
         </div>
-        <p className="text-xs text-slate-400 hidden md:block">{tasks.length} rows · click=select · dbl-click=edit · drag=reorder</p>
+
+        {/* Row 2: format toolbar — visible only when a cell is selected */}
+        {selectedCell && selTask && (
+          <div className="flex items-center gap-1 px-4 py-1.5 border-t border-slate-100 bg-slate-50/60">
+            <span className="text-[10px] text-slate-400 mr-1 font-medium uppercase tracking-wide">Format:</span>
+
+            {/* Edit cell */}
+            {isEditable(COLUMNS.find(c => c.key === selectedCell.col) || {}, selTask) && (
+              <button
+                onClick={() => { setEditCell(selectedCell); setSelectedCell(null); }}
+                title="Edit cell (double-click or Enter)"
+                className="p-1.5 rounded hover:bg-blue-50 text-blue-600 transition"
+              >
+                <Edit2 size={13}/>
+              </button>
+            )}
+
+            <div className="w-px h-4 bg-slate-200 mx-0.5"/>
+
+            {/* Bold */}
+            <button
+              onClick={() => handleToggleBold(selectedCell.taskId, selectedCell.col)}
+              title="Bold (Ctrl+B)"
+              className={`p-1.5 rounded transition ${selFmt?.bold ? 'bg-slate-700 text-white' : 'hover:bg-slate-100 text-slate-700'}`}
+            >
+              <Bold size={13}/>
+            </button>
+
+            <div className="w-px h-4 bg-slate-200 mx-0.5"/>
+
+            {/* BG color swatches */}
+            {BG_COLORS.map(c => (
+              <button key={c.hex} title={c.label}
+                onClick={() => handleSetBgColor(selectedCell.taskId, selectedCell.col, c.hex)}
+                className={`w-4 h-4 rounded border transition hover:scale-110 ${selFmt?.bgColor === c.hex ? 'border-blue-500 border-2' : 'border-slate-300'}`}
+                style={{ backgroundColor: c.hex }}
+              />
+            ))}
+
+            {/* Clear format */}
+            {(selFmt?.bold || selFmt?.bgColor) && (
+              <>
+                <div className="w-px h-4 bg-slate-200 mx-0.5"/>
+                <button onClick={() => handleClearFormat(selectedCell.taskId, selectedCell.col)}
+                  title="Clear formatting" className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 text-xs transition">
+                  ✕
+                </button>
+              </>
+            )}
+
+            <div className="w-px h-4 bg-slate-200 mx-0.5"/>
+
+            {/* Copy */}
+            <button onClick={() => {
+              const val = selTask[selectedCell.col] ?? '';
+              navigator.clipboard.writeText(String(val)).catch(() => {});
+              setCopiedCell({ ...selectedCell, value: val });
+              toast.success('Copied', { duration: 1000 });
+            }} title="Copy cell (Ctrl+C)" className="p-1.5 rounded hover:bg-slate-100 text-slate-500 transition">
+              <Copy size={12}/>
+            </button>
+
+            {/* Paste */}
+            {copiedCell && (
+              <button onClick={() => {
+                navigator.clipboard.readText().then(text => {
+                  handleCellChange(selectedCell.taskId, selectedCell.col, text.trim());
+                }).catch(() => {});
+              }} title="Paste (Ctrl+V)" className="p-1.5 rounded hover:bg-slate-100 text-slate-500 transition">
+                <Clipboard size={12}/>
+              </button>
+            )}
+
+            <div className="w-px h-4 bg-slate-200 mx-0.5 ml-auto"/>
+            <span className="text-[10px] text-slate-400">
+              {COLUMNS.find(c => c.key === selectedCell.col)?.label} · row {(sortedTasks.findIndex(t => t.id === selectedCell.taskId) + 1) || '?'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── Column toggle ── */}
@@ -753,80 +907,6 @@ const ProjectPlan = ({ project, canEdit }) => {
         <button onClick={handleAddRow} className="px-4 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg flex items-center gap-2 text-sm font-medium border border-emerald-200 transition">
           <Plus size={15}/> Add Row
         </button>
-      )}
-
-      {/* ── Floating format + edit toolbar ── */}
-      {selectedCell && selTask && toolbarPos && (
-        <div data-format-toolbar
-          className="fixed z-[9999] bg-white border border-slate-200 rounded-lg shadow-xl flex items-center gap-1 px-2 py-1.5"
-          style={{ top: toolbarPos.top, left: toolbarPos.left }}
-          onMouseDown={e => e.stopPropagation()}
-        >
-          {/* Edit cell button */}
-          <button
-            onClick={() => { setEditCell(selectedCell); setSelectedCell(null); setToolbarPos(null); }}
-            title="Edit cell (double-click or Enter)"
-            className="p-1.5 rounded hover:bg-blue-50 text-blue-600 transition"
-          >
-            <Edit2 size={13}/>
-          </button>
-
-          <div className="w-px h-4 bg-slate-200 mx-0.5"/>
-
-          {/* Bold */}
-          <button
-            onClick={() => handleToggleBold(selectedCell.taskId, selectedCell.col)}
-            title="Bold (Ctrl+B)"
-            className={`p-1.5 rounded text-xs font-bold transition ${selFmt?.bold ? 'bg-slate-700 text-white' : 'hover:bg-slate-100 text-slate-700'}`}
-          >
-            <Bold size={13}/>
-          </button>
-
-          <div className="w-px h-4 bg-slate-200 mx-0.5"/>
-
-          {/* BG color swatches */}
-          {BG_COLORS.map(c => (
-            <button key={c.hex} title={c.label}
-              onClick={() => handleSetBgColor(selectedCell.taskId, selectedCell.col, c.hex)}
-              className={`w-4 h-4 rounded border transition hover:scale-110 ${selFmt?.bgColor === c.hex ? 'border-blue-500 border-2' : 'border-slate-300'}`}
-              style={{ backgroundColor: c.hex }}
-            />
-          ))}
-
-          {/* Clear format */}
-          {(selFmt?.bold || selFmt?.bgColor) && (
-            <>
-              <div className="w-px h-4 bg-slate-200 mx-0.5"/>
-              <button onClick={() => handleClearFormat(selectedCell.taskId, selectedCell.col)}
-                title="Clear formatting" className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 text-xs transition">
-                ✕
-              </button>
-            </>
-          )}
-
-          <div className="w-px h-4 bg-slate-200 mx-0.5"/>
-
-          {/* Copy */}
-          <button onClick={() => {
-            const val = selTask[selectedCell.col] ?? '';
-            navigator.clipboard.writeText(String(val)).catch(() => {});
-            setCopiedCell({ ...selectedCell, value: val });
-            toast.success('Copied', { duration: 1000 });
-          }} title="Copy cell (Ctrl+C)" className="p-1.5 rounded hover:bg-slate-100 text-slate-500 transition">
-            <Copy size={12}/>
-          </button>
-
-          {/* Paste */}
-          {copiedCell && (
-            <button onClick={() => {
-              navigator.clipboard.readText().then(text => {
-                handleCellChange(selectedCell.taskId, selectedCell.col, text.trim());
-              }).catch(() => {});
-            }} title="Paste (Ctrl+V)" className="p-1.5 rounded hover:bg-slate-100 text-slate-500 transition">
-              <Clipboard size={12}/>
-            </button>
-          )}
-        </div>
       )}
 
       {/* ── Row action menu — rendered as a portal so it escapes sticky z-index stacking contexts ── */}
