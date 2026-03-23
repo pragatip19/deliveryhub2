@@ -620,7 +620,24 @@ const ProjectPlan = ({ project, canEdit }) => {
     if (col.key === 'milestone') return <select value={val||''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{milestones.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select>;
     if (col.type === 'date') {
       const dv = val ? formatDateInput(typeof val==='string' ? parseDate(val) : val) : '';
-      return <input type="date" value={dv} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)} />;
+      // Use defaultValue (uncontrolled) + commit only on blur — NOT on onChange.
+      // onChange fires on every field change (day/month/year individually) in date inputs,
+      // which would commit an intermediate value and close the editor before the user finishes.
+      const onDateBlur = (e) => {
+        if (e.target.value) commit(e.target.value);
+        else setEditCell(null);
+      };
+      const onDateEnter = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault(); e.stopPropagation();
+          const v = e.target.value;
+          if (v) commit(v); else setEditCell(null);
+          const st = sortedTasksRef.current;
+          const idx = st.findIndex(t => t.id === task.id);
+          if (idx >= 0 && idx < st.length - 1) setSelectedCell({ taskId: st[idx + 1].id, col: col.key });
+        }
+      };
+      return <input type="date" defaultValue={dv} onBlur={onDateBlur} onKeyDown={onDateEnter} className={cls} autoFocus />;
     }
     if (col.type === 'number') return <input type="number" value={val??''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus min={0} onBlur={()=>setEditCell(null)} />;
     return <input type="text" value={val??''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)} />;
