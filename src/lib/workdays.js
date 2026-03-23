@@ -68,7 +68,10 @@ export function formatDate(date) {
 }
 
 /**
- * Format date for HTML date input (YYYY-MM-DD)
+ * Format date for HTML date input (YYYY-MM-DD) — uses LOCAL date components.
+ * Also used as the canonical date→string serialiser throughout the app.
+ * Never use toISOString().split('T')[0] — that outputs UTC and shifts the day
+ * in non-UTC timezones (e.g. IST UTC+5:30).
  */
 export function formatDateInput(date) {
   if (!date) return '';
@@ -81,10 +84,22 @@ export function formatDateInput(date) {
 }
 
 /**
- * Parse a date string to a Date object
+ * Alias — convert a Date to YYYY-MM-DD using LOCAL time.
+ * Use this everywhere instead of date.toISOString().split('T')[0].
+ */
+export const toDateStr = formatDateInput;
+
+/**
+ * Parse a date string to a Date object (LOCAL midnight, not UTC).
+ * new Date('YYYY-MM-DD') is UTC midnight which shifts the day in non-UTC timezones.
+ * We always want the calendar date the user sees, so parse as local time.
  */
 export function parseDate(str) {
   if (!str) return null;
+  if (typeof str === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [y, m, d] = str.split('-').map(Number);
+    return new Date(y, m - 1, d); // local midnight — timezone-safe
+  }
   const d = new Date(str);
   return isNaN(d.getTime()) ? null : d;
 }

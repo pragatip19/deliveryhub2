@@ -1,6 +1,6 @@
 // calculations.js — All formula logic for the project plan
 
-import { addWorkdays, calcPlannedEnd, networkdays, today, parseDate } from './workdays';
+import { addWorkdays, calcPlannedEnd, networkdays, today, parseDate, toDateStr } from './workdays';
 
 // ============================================================
 // STATUS HELPERS
@@ -85,14 +85,14 @@ export function calculateTask(task, allTasks) {
   if (!task.planned_start_locked) {
     const ps = calcPlannedStart(task, allTasks);
     if (ps) {
-      result.planned_start = ps.toISOString().split('T')[0];
+      result.planned_start = toDateStr(ps);
     }
   }
 
   // 2. Planned End = WORKDAY(planned_start, duration - 1)
   if (result.planned_start && result.duration) {
     const pe = calcPlannedEnd(parseDate(result.planned_start), result.duration);
-    if (pe) result.planned_end = pe.toISOString().split('T')[0];
+    if (pe) result.planned_end = toDateStr(pe);
   }
 
   // 3. Set Baseline once (if not already set)
@@ -408,8 +408,8 @@ export function recalcAllDatesFromAnchor(tasks, anchorStart) {
     const duration = Math.max(1, task.duration || 1);
     const pe = calcPlannedEnd(ps, duration);
 
-    const psStr = ps.toISOString().split('T')[0];
-    const peStr = pe  ? pe.toISOString().split('T')[0] : psStr;
+    const psStr = toDateStr(ps);
+    const peStr = pe ? toDateStr(pe) : psStr;
 
     // Only overwrite baseline if it hasn't been explicitly locked by the user
     const baselineAlreadyLocked = task.baseline_locked === true;
