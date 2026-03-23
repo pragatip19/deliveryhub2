@@ -60,7 +60,12 @@ function getPredecessorEnd(pred) {
   const todayDate = today();
 
   if (status === 'Done') {
-    return currentEnd || plannedEnd;
+    const end = currentEnd || plannedEnd;
+    if (!end) return null;
+    // Predecessor finished in the past → successor can start no earlier than
+    // today, so cascade to today instead of the stale past date.
+    if (end < todayDate) return addWorkdays(todayDate, -1);
+    return end;
   }
   if (status === 'In Progress') {
     if (currentEnd && plannedEnd && currentEnd > plannedEnd) return currentEnd;
