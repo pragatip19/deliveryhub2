@@ -126,9 +126,22 @@ const ProjectPlan = ({ project, canEdit }) => {
   const debouncedSave = useCallback(
     debounce(async (updatedTasks) => {
       try {
+        // Strip computed/derived fields that are not DB columns.
+        // baseline_delta does not exist in the project_plan table → PGRST204.
+        // Also strip any old field-name aliases that may be stale on task objects.
+        const STRIP_KEYS = [
+          'baseline_delta',
+          'no_of_days_delay',
+          'delay_on_track',
+          'planned_start_vs_baseline',
+        ];
         const toSave = updatedTasks
           .filter(t => t.id && !String(t.id).startsWith('temp-'))
-          .map(t => ({ ...t, project_id: project.id }));
+          .map(t => {
+            const clean = { ...t, project_id: project.id };
+            STRIP_KEYS.forEach(k => delete clean[k]);
+            return clean;
+          });
         if (toSave.length) await bulkUpsertPlanTasks(toSave);
       } catch (e) { toast.error('Save failed: ' + (e.message || '')); }
     }, 900),
@@ -277,7 +290,11 @@ const ProjectPlan = ({ project, canEdit }) => {
         return final;
       }
 
-      const final = ['dependency','duration','status'].includes(colKey)
+      // Recalculate the full plan whenever a field that affects downstream
+      // tasks changes.  actual_start / current_end are included so that:
+      //   (a) the edited row stays in sort_order position (recalculate sorts),
+      //   (b) days_delay propagates to all Not-Started tasks immediately.
+      const final = ['dependency','duration','status','actual_start','current_end'].includes(colKey)
         ? recalculatePlan(next) : next;
       pushHistory(final); debouncedSave(final);
       return final;
