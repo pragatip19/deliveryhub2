@@ -131,6 +131,8 @@ const ProjectPlan = ({ project, canEdit }) => {
         // Also strip any old field-name aliases that may be stale on task objects.
         const STRIP_KEYS = [
           'baseline_delta',
+          'days_delay',
+          'delay_status',
           'no_of_days_delay',
           'delay_on_track',
           'planned_start_vs_baseline',
