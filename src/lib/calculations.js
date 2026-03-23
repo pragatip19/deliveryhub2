@@ -144,8 +144,13 @@ export function calcDaysDelay(task) {
   const currentEnd = parseDate(task.current_end);
 
   if (status === 'Not Started') {
-    if (!baselineStart) return 0;
-    const delay = networkdays(baselineStart, todayDate) - 1;
+    // Use baseline_planned_start as the reference if available; fall back to
+    // planned_start so tasks that never had a baseline still show a delay when
+    // today is past their planned start date (e.g. predecessor is Done and
+    // cascaded a start date that is now in the past).
+    const refDate = baselineStart || parseDate(task.planned_start);
+    if (!refDate) return 0;
+    const delay = networkdays(refDate, todayDate) - 1;
     return Math.max(0, delay);
   }
   if (status === 'In Progress') {
