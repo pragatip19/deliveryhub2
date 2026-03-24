@@ -147,7 +147,8 @@ export default function ProjectHealth({ project, canEdit }) {
   const sowDelta      = currentSOW - expectedSOW;
 
   const isDelayed   = projectedGoLive && plannedGoLive && new Date(projectedGoLive) > new Date(plannedGoLive);
-  const statusLabel = !kickoffDate ? 'Not Started' : (delayDays > 0 || isDelayed) ? 'Delayed' : 'On Track';
+  // Status badge is driven by SOW delta (same signal shown in the SOW completion bars), not Release System delay days
+  const statusLabel = !kickoffDate ? 'Not Started' : (sowDelta < 0 ? 'Delayed' : 'On Track');
   const statusStyle = {
     'On Track':   'bg-emerald-100 text-emerald-700 border-emerald-200',
     'Delayed':    'bg-red-100 text-red-700 border-red-200',
@@ -269,18 +270,41 @@ export default function ProjectHealth({ project, canEdit }) {
 
         </div>
 
-        {/* Right sidebar: Risks + Issues */}
-        <div className="w-36 flex flex-col gap-3 shrink-0">
-          <CountBox icon={AlertTriangle}
-            count={openRisks} label="Open Risks"
-            bg="bg-amber-50 border border-amber-200"
-            iconBg="bg-amber-100" iconColor="text-amber-600" textColor="text-amber-700"
-          />
-          <CountBox icon={Activity}
-            count={openIssues} label="Open Issues"
-            bg="bg-red-50 border border-red-200"
-            iconBg="bg-red-100" iconColor="text-red-600" textColor="text-red-700"
-          />
+        {/* Right sidebar: Risks + Issues + Today's Activities */}
+        <div className="w-64 shrink-0 flex flex-col gap-3">
+          {/* Risks & Issues side-by-side */}
+          <div className="grid grid-cols-2 gap-3">
+            <CountBox icon={AlertTriangle}
+              count={openRisks} label="Open Risks"
+              bg="bg-amber-50 border border-amber-200"
+              iconBg="bg-amber-100" iconColor="text-amber-600" textColor="text-amber-700"
+            />
+            <CountBox icon={Activity}
+              count={openIssues} label="Open Issues"
+              bg="bg-red-50 border border-red-200"
+              iconBg="bg-red-100" iconColor="text-red-600" textColor="text-red-700"
+            />
+          </div>
+
+          {/* Today's Activities — scrollable, fills remaining sidebar height */}
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex-1 overflow-y-auto" style={{ maxHeight: '16rem' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <CalendarDays size={14} className="text-blue-500" />
+              <h3 className="text-sm font-semibold text-slate-800">Today's Activities</h3>
+            </div>
+            {todayTasks.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No activities due today.</p>
+            ) : (
+              <div className="space-y-2">
+                {todayTasks.map(t => (
+                  <div key={t.id} className="bg-white rounded-lg p-2.5 border border-blue-100">
+                    <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">{t.milestone}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
       </div>
@@ -315,39 +339,22 @@ export default function ProjectHealth({ project, canEdit }) {
         </div>
       </div>
 
-      {/* ── Operational Row: Today · Urgent · DM Actions ── */}
-      <div className="grid grid-cols-3 gap-4">
-
-        {/* Today's Critical Activities */}
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <CalendarDays size={14} className="text-blue-500" />
-            <h3 className="text-sm font-semibold text-slate-800">Today's Activities</h3>
-          </div>
-          {todayTasks.length === 0 ? (
-            <p className="text-xs text-slate-400 italic">No activities due today.</p>
-          ) : (
-            <div className="space-y-2">
-              {todayTasks.map(t => (
-                <div key={t.id} className="bg-white rounded-lg p-2.5 border border-blue-100">
-                  <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">{t.milestone}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      {/* ── Below SOW: Needs Immediate Action + DM Action Items ── */}
+      <div className="grid grid-cols-2 gap-4">
 
         {/* Needs Immediate Action — delayed > 10 days */}
         <div className="rounded-xl border border-red-200 bg-red-50 p-4">
           <div className="flex items-center gap-2 mb-3">
             <AlertCircle size={14} className="text-red-500" />
             <h3 className="text-sm font-semibold text-slate-800">Needs Immediate Action</h3>
+            {urgentTasks.length > 0 && (
+              <span className="ml-auto bg-red-100 text-red-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{urgentTasks.length}</span>
+            )}
           </div>
           {urgentTasks.length === 0 ? (
             <p className="text-xs text-slate-400 italic">No activities delayed beyond 10 days.</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 max-h-52 overflow-y-auto">
               {urgentTasks.map(t => (
                 <div key={t.id} className="bg-white rounded-lg p-2.5 border border-red-100">
                   <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
@@ -405,7 +412,7 @@ export default function ProjectHealth({ project, canEdit }) {
         </div>
 
       </div>
-      {/* ── End Operational Row ── */}
+      {/* ── End below-SOW row ── */}
 
     </div>
   );
