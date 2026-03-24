@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Edit2, Save, X, AlertTriangle, Activity, TrendingUp, TrendingDown, Minus, Calendar, Target, Clock } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Edit2, Save, X, AlertTriangle, Activity, TrendingUp, TrendingDown, Minus, Calendar, Target, Clock, AlertCircle, CalendarDays } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getPlanTasks, updateProject, getRaidItems } from '../../../lib/supabase';
 import { calcSOWCompletion, getActiveTasks, getKickoffDate, getProjectedGoLive } from '../../../lib/calculations';
@@ -87,6 +87,18 @@ export default function ProjectHealth({ project, canEdit }) {
   const [editing, setEditing]       = useState(null);
   const [editVal, setEditVal]       = useState('');
 
+  const dmActionsKey = `dmActions_${project?.id}`;
+  const [dmActions, setDmActions]   = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(`dmActions_${project?.id}`) || '[]');
+      const arr = Array.isArray(saved) ? saved : [];
+      while (arr.length < 5) arr.push({ text: '', byWhen: '' });
+      return arr.slice(0, 5);
+    } catch {
+      return Array.from({ length: 5 }, () => ({ text: '', byWhen: '' }));
+    }
+  });
+
   useEffect(() => { setLocalProject(project); }, [project]);
 
   useEffect(() => {
@@ -141,6 +153,16 @@ export default function ProjectHealth({ project, canEdit }) {
     'Delayed':    'bg-red-100 text-red-700 border-red-200',
     'Not Started':'bg-slate-100 text-slate-600 border-slate-200',
   }[statusLabel];
+
+  const todayISO    = new Date().toISOString().split('T')[0];
+  const todayTasks  = useMemo(() =>
+    tasks.filter(t => t.planned_end === todayISO || t.current_end === todayISO),
+    [tasks, todayISO]
+  );
+  const urgentTasks = useMemo(() =>
+    tasks.filter(t => typeof t.days_delay === 'number' && t.days_delay > 10),
+    [tasks]
+  );
 
   async function saveField(field, value) {
     try {
@@ -292,6 +314,99 @@ export default function ProjectHealth({ project, canEdit }) {
           <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded bg-blue-400 inline-block" /> Expected: elapsed days / projected onboarding days</span>
         </div>
       </div>
+
+      {/* ── Operational Row: Today · Urgent · DM Actions ── */}
+      <div className="grid grid-cols-3 gap-4">
+
+        {/* Today's Critical Activities */}
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <CalendarDays size={14} className="text-blue-500" />
+            <h3 className="text-sm font-semibold text-slate-800">Today's Activities</h3>
+          </div>
+          {todayTasks.length === 0 ? (
+            <p className="text-xs text-slate-400 italic">No activities due today.</p>
+          ) : (
+            <div className="space-y-2">
+              {todayTasks.map(t => (
+                <div key={t.id} className="bg-white rounded-lg p-2.5 border border-blue-100">
+                  <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">{t.milestone}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Needs Immediate Action — delayed > 10 days */}
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertCircle size={14} className="text-red-500" />
+            <h3 className="text-sm font-semibold text-slate-800">Needs Immediate Action</h3>
+          </div>
+          {urgentTasks.length === 0 ? (
+            <p className="text-xs text-slate-400 italic">No activities delayed beyond 10 days.</p>
+          ) : (
+            <div className="space-y-2">
+              {urgentTasks.map(t => (
+                <div key={t.id} className="bg-white rounded-lg p-2.5 border border-red-100">
+                  <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">{t.milestone}</p>
+                  <span className="inline-block mt-1 bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5 rounded font-semibold">
+                    +{t.days_delay}d delayed
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* DM Action Items */}
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Clock size={14} className="text-amber-500" />
+            <h3 className="text-sm font-semibold text-slate-800">DM Action Items</h3>
+            <span className="text-[10px] text-slate-400 ml-auto">from daily call</span>
+          </div>
+          <div className="space-y-3">
+            {dmActions.map((action, i) => (
+              <div key={i}>
+                <input
+                  type="text"
+                  value={action.text}
+                  onChange={e => {
+                    const updated = dmActions.map((a, idx) =>
+                      idx === i ? { ...a, text: e.target.value } : a
+                    );
+                    setDmActions(updated);
+                    try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
+                  }}
+                  placeholder={`Action ${i + 1}`}
+                  className="w-full text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white"
+                />
+                <div className="flex items-center gap-1.5 mt-1">
+                  <span className="text-[10px] text-slate-500 font-medium shrink-0">Due:</span>
+                  <input
+                    type="date"
+                    value={action.byWhen}
+                    onChange={e => {
+                      const updated = dmActions.map((a, idx) =>
+                        idx === i ? { ...a, byWhen: e.target.value } : a
+                      );
+                      setDmActions(updated);
+                      try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
+                    }}
+                    className="flex-1 text-xs px-2 py-1 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-700 bg-white"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </div>
+      {/* ── End Operational Row ── */}
+
     </div>
   );
 }
