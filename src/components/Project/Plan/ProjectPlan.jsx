@@ -887,15 +887,14 @@ const ProjectPlan = ({ project, canEdit }) => {
                     <th key={c.key}
                       style={{ minWidth: w, width: w, left: frozenLeftOffsets[c.key], backgroundColor: '#f8fafc' }}
                       className="sticky z-30 border-r border-b border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
-                      <div className="relative flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
+                      <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
                         {c.label}<ArrowUpDown size={10} className="opacity-40"/>
-                        {/* Resize handle inside content div so it uses relative positioning from this div */}
-                        <div
-                          className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity"
-                          style={{ top: '-8px', height: 'calc(100% + 16px)' }}
-                          onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
-                        />
                       </div>
+                      {/* Resize handle: direct child of sticky th — sticky IS a containing block */}
+                      <div
+                        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
+                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
+                      />
                     </th>
                   );
                 })}
@@ -905,16 +904,15 @@ const ProjectPlan = ({ project, canEdit }) => {
                   return (
                     <th key={c.key}
                       style={{ minWidth: w, width: w, backgroundColor: '#f8fafc' }}
-                      className="border-r border-b border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
-                      <div className="relative flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
+                      className="relative border-r border-b border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
+                      <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
                         {c.label}<ArrowUpDown size={10} className="opacity-40"/>
-                        {/* Resize handle */}
-                        <div
-                          className="absolute top-0 right-0 w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity"
-                          style={{ top: '-8px', height: 'calc(100% + 16px)' }}
-                          onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
-                        />
                       </div>
+                      {/* Resize handle: direct child of relative th */}
+                      <div
+                        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
+                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
+                      />
                     </th>
                   );
                 })}
