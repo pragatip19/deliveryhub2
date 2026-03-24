@@ -24,6 +24,7 @@ const COLUMNS = [
   { key: 'milestone',              label: 'Milestone',            width: 160, frozen: true,  type: 'milestone' },
   { key: 'activities',             label: 'Activities',           width: 220, frozen: true,  type: 'text' },
   { key: 'tools',                  label: 'Tools',                width: 150, frozen: false, type: 'text' },
+  { key: 'doc_link',               label: 'Document Link',        width: 180, frozen: false, type: 'link' },
   { key: 'owner',                  label: 'Owner',                width: 150, frozen: false, type: 'people' },
   { key: 'status',                 label: 'Status',               width: 130, frozen: false, type: 'status' },
   { key: 'duration',               label: 'Duration',             width: 80,  frozen: false, type: 'number' },
@@ -652,6 +653,34 @@ const ProjectPlan = ({ project, canEdit }) => {
         </div>
       );
     }
+    if (col.type === 'link') {
+      if (!val) return (
+        <div {...clickProps} style={wrapStyle} className={`${textCls} cursor-pointer`}>
+          <span className="text-gray-300">—</span>
+        </div>
+      );
+      const href = /^https?:\/\//i.test(val) ? val : `https://${val}`;
+      return (
+        <div
+          style={wrapStyle}
+          className={`flex items-center gap-1.5 ${isSelected ? 'outline outline-2 outline-blue-500 rounded' : ''}`}
+          onClick={e => handleCellSingleClick(e, task.id, col.key, task)}
+          onDoubleClick={e => handleCellDoubleClick(e, task.id, col.key, task)}
+        >
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-500 hover:text-blue-700 flex-shrink-0"
+            onClick={e => e.stopPropagation()}
+            title={val}
+          >
+            <Link2 size={12} />
+          </a>
+          <span className="text-xs text-blue-600 underline truncate">{val}</span>
+        </div>
+      );
+    }
     return (
       <div {...clickProps} style={wrapStyle} className={`${textCls} cursor-pointer`}>
         {val ?? <span className="text-gray-300">—</span>}
@@ -890,9 +919,9 @@ const ProjectPlan = ({ project, canEdit }) => {
                       <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
                         {c.label}<ArrowUpDown size={10} className="opacity-40"/>
                       </div>
-                      {/* Resize handle: direct child of sticky th — sticky IS a containing block */}
+                      {/* Resize handle — top-0 bottom-0 stretches to full cell height without needing explicit height on th */}
                       <div
-                        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
+                        className="absolute top-0 bottom-0 right-0 w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
                         onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
                         onClick={e => e.stopPropagation()}
                       />
@@ -909,9 +938,9 @@ const ProjectPlan = ({ project, canEdit }) => {
                       <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
                         {c.label}<ArrowUpDown size={10} className="opacity-40"/>
                       </div>
-                      {/* Resize handle: direct child of relative th */}
+                      {/* Resize handle — top-0 bottom-0 stretches to full cell height */}
                       <div
-                        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
+                        className="absolute top-0 bottom-0 right-0 w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
                         onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
                         onClick={e => e.stopPropagation()}
                       />
