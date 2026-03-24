@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Eye, Download, Plus, Trash2, ArrowUpDown, MoreVertical,
   Undo2, Redo2, ArrowDownToLine, ArrowUpToLine, Bold, Copy, Clipboard, Edit2, GripVertical,
-  Lock, LockOpen,
+  Lock, LockOpen, Link2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import debounce from 'lodash.debounce';
@@ -14,7 +14,7 @@ import {
 } from '../../../lib/supabase';
 import { STATUS_OPTIONS, PLAN_TEMPLATE } from '../../../lib/templates';
 import { recalculatePlan, recalcAllDatesFromAnchor, getStatusColor } from '../../../lib/calculations';
-import { calcPlannedEnd, formatDate, formatDateInput, parseDate, networkdays } from '../../../lib/workdays';
+import { calcPlannedEnd, formatDate, formatDateInput, parseDate } from '../../../lib/workdays';
 
 // ─── Column definitions ────────────────────────────────────────────────────────
 const ACTION_COL_W = 48; // px width of the combined action column (drag + menu)
@@ -307,13 +307,10 @@ const ProjectPlan = ({ project, canEdit }) => {
         task.status = 'In Progress';
       }
       if (colKey === 'current_end' && value) { task.status = 'Done'; }
-
-      // Recalc delay
-      if (task.planned_end && task.current_end) {
-        const delay = networkdays(parseDate(task.planned_end), parseDate(task.current_end));
-        task.delay_status = delay > 0 ? 'Delay' : 'On Track';
-        task.days_delay = Math.max(0, delay - 1);
-      }
+      // NOTE: delay_status and days_delay are NOT recalculated here.
+      // They are derived by recalculatePlan → calculateTask → calcDaysDelay,
+      // which is called below only when a date-affecting field changes.
+      // Editing deviation / deviation_details / learnings must NOT touch delay fields.
 
       next[idx] = task;
 
@@ -874,7 +871,7 @@ const ProjectPlan = ({ project, canEdit }) => {
 
       {/* ── Table ── */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-plan-table>
-        <div className="overflow-x-auto overflow-y-auto max-h-[65vh]" onPaste={handlePaste}>
+        <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }} onPaste={handlePaste}>
           <table className="w-full text-xs" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
             {/* Header */}
             <thead className="sticky top-0 z-20" style={{ backgroundColor: '#f8fafc' }}>
