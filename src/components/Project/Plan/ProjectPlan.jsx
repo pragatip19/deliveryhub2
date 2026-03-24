@@ -89,11 +89,21 @@ const ProjectPlan = ({ project, canEdit }) => {
   const [dragId, setDragId]             = useState(null);
   const [dragOverId, setDragOverId]     = useState(null);
 
-  // Column resize state — per-key widths, initialised from COLUMNS defaults
-  const [colWidths, setColWidths]       = useState(() =>
-    Object.fromEntries(COLUMNS.map(c => [c.key, c.width]))
-  );
+  // Column resize state — per-key widths, persisted to localStorage
+  const [colWidths, setColWidths] = useState(() => {
+    const defaults = Object.fromEntries(COLUMNS.map(c => [c.key, c.width]));
+    try {
+      const saved = localStorage.getItem('planColWidths');
+      if (saved) return { ...defaults, ...JSON.parse(saved) };
+    } catch {}
+    return defaults;
+  });
   const resizingRef = useRef(null); // { key, startX, startW }
+
+  // Persist column widths to localStorage whenever they change
+  useEffect(() => {
+    try { localStorage.setItem('planColWidths', JSON.stringify(colWidths)); } catch {}
+  }, [colWidths]);
 
   // Global mouse handlers for column resize
   useEffect(() => {
@@ -156,6 +166,7 @@ const ProjectPlan = ({ project, canEdit }) => {
           'baseline_delta',
           'days_delay',
           'delay_status',
+          'learnings',           // not yet a DB column
           'no_of_days_delay',
           'delay_on_track',
           'planned_start_vs_baseline',
@@ -633,10 +644,12 @@ const ProjectPlan = ({ project, canEdit }) => {
       );
     }
     if (col.key === 'milestone') return null; // rendered separately with color badge
-    if (col.key === 'tools' && val && val.startsWith('http')) {
+    if (col.key === 'tools' && val) {
+      // Show any tools value as a hyperlink; auto-prefix https:// for bare domains/paths
+      const href = /^https?:\/\//i.test(val) ? val : `https://${val}`;
       return (
         <div style={wrapStyle} className={isSelected ? 'outline outline-2 outline-blue-500 rounded' : ''}>
-          <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs truncate block">{val}</a>
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs truncate block">{val}</a>
         </div>
       );
     }
