@@ -28,6 +28,24 @@ function getProjectStatus(project) {
   return 'Not Started';
 }
 
+function getProjectHealth(project) {
+  const { kickoff_date, planned_go_live, projected_go_live } = project;
+  if (!kickoff_date || !planned_go_live) return { status: 'Not Started', delayDays: 0, expectedPct: 0 };
+  const today    = new Date();
+  const kickoff  = new Date(kickoff_date);
+  const planned  = new Date(planned_go_live);
+  const totalMs  = Math.max(1, planned - kickoff);
+  const elapsedMs = today - kickoff;
+  const expectedPct = Math.min(100, Math.max(0, Math.round((elapsedMs / totalMs) * 100)));
+  let delayDays = 0;
+  let status = 'On Track';
+  if (projected_go_live) {
+    delayDays = Math.ceil((new Date(projected_go_live) - planned) / 86400000);
+    if (delayDays > 0) status = 'Delayed';
+  }
+  return { status, delayDays, expectedPct };
+}
+
 function fmtDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
@@ -111,7 +129,7 @@ function EditProjectModal({ project, onClose, onSaved, dmProfiles, categories, c
 function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
-  const status = getProjectStatus(project);
+  const health = getProjectHealth(project);
 
   useEffect(() => {
     function handleClick(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); }
@@ -154,15 +172,36 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
         )}
       </div>
 
+      {/* Health metric — Expected progress + on-track/delay status */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-xs text-slate-500 font-medium">Expected Progress</span>
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+            health.status === 'On Track'    ? 'bg-emerald-100 text-emerald-700' :
+            health.status === 'Delayed'     ? 'bg-red-100 text-red-700' :
+                                              'bg-slate-100 text-slate-500'
+          }`}>
+            {health.status === 'Delayed' ? `${health.delayDays}d delayed` : health.status}
+          </span>
+        </div>
+        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${
+              health.status === 'Delayed'     ? 'bg-red-400' :
+              health.status === 'On Track'    ? 'bg-emerald-400' :
+                                                'bg-slate-300'
+            }`}
+            style={{ width: `${health.expectedPct}%` }}
+          />
+        </div>
+        <div className="text-right text-xs text-slate-400 mt-0.5">{health.expectedPct}% expected</div>
+      </div>
+
       {/* Metrics */}
       <div className="space-y-2 mb-4">
         <div className="flex items-center justify-between text-sm">
           <span className="text-slate-500">DM</span>
           <span className="font-medium text-slate-800 truncate max-w-[60%] text-right">{project.dm_name || 'Unassigned'}</span>
-        </div>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-slate-500">Status</span>
-          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${PROJECT_STATUS_COLORS[status]}`}>{status}</span>
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-slate-500">Deal Stage</span>

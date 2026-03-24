@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Eye, Download, Plus, Trash2, ArrowUpDown, MoreVertical,
   Undo2, Redo2, ArrowDownToLine, ArrowUpToLine, Bold, Copy, Clipboard, Edit2, GripVertical,
-  Lock, LockOpen,
+  Lock, LockOpen, AlertCircle, Clock, CalendarDays,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import debounce from 'lodash.debounce';
@@ -69,6 +69,19 @@ const ProjectPlan = ({ project, canEdit }) => {
   const { isAdmin: isAdminFn } = useAuth();
   const isProjectAdmin = canEdit && isAdminFn();
   const isDM = canEdit;
+
+  // ─── Side-panel: DM action items (persisted in localStorage per project) ──
+  const dmActionsKey = `dmActions_${project?.id}`;
+  const [dmActions, setDmActions] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(`dmActions_${project?.id}`) || '[]');
+      const arr = Array.isArray(saved) ? saved : [];
+      while (arr.length < 5) arr.push({ text: '', byWhen: '' });
+      return arr.slice(0, 5);
+    } catch {
+      return Array.from({ length: 5 }, () => ({ text: '', byWhen: '' }));
+    }
+  });
 
   const [tasks, setTasks]               = useState([]);
   const [milestones, setMilestones]     = useState([]);
@@ -740,10 +753,23 @@ const ProjectPlan = ({ project, canEdit }) => {
   const selTask = selectedCell ? tasks.find(t => t.id === selectedCell.taskId) : null;
   const selFmt  = selTask && selectedCell ? getCellFmt(selTask, selectedCell.col) : null;
 
+  // ─── Side-panel computed data ──────────────────────────────────────────────
+  const todayISO = new Date().toISOString().split('T')[0];
+  const todayTasks  = useMemo(() =>
+    tasks.filter(t => t.planned_end === todayISO || t.current_end === todayISO),
+    [tasks, todayISO]
+  );
+  const urgentTasks = useMemo(() =>
+    tasks.filter(t => typeof t.days_delay === 'number' && t.days_delay > 10),
+    [tasks]
+  );
+
   if (loading) return <div className="text-center py-12 text-slate-500 text-sm">Loading project plan…</div>;
 
   return (
-    <div className="space-y-3">
+    <div className="flex gap-4 items-start">
+    {/* ── Main Plan ── */}
+    <div className="flex-1 min-w-0 space-y-3">
       {/* ── Toolbar ── */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm" data-format-toolbar>
         {/* Row 1: main actions */}
@@ -946,7 +972,7 @@ const ProjectPlan = ({ project, canEdit }) => {
 
                     {/* Combined action col: drag handle + row menu (left side) */}
                     <td className="sticky z-10 border-r border-slate-100"
-                      style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W, backgroundColor: task.milestone ? msColor.hex : '#ffffff' }}
+                      style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W, backgroundColor: '#ffffff' }}
                       onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-between px-1 py-1.5">
                         {isDM && <GripVertical size={12} className="text-slate-300 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition flex-shrink-0"/>}
@@ -968,7 +994,7 @@ const ProjectPlan = ({ project, canEdit }) => {
 
                     {/* Row # */}
                     <td className="sticky z-10 border-r border-slate-100 px-2 py-1.5 text-center text-slate-400 font-medium"
-                      style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W, backgroundColor: task.milestone ? msColor.hex : '#ffffff' }}>
+                      style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W, backgroundColor: '#ffffff' }}>
                       {visualIdx + 1}
                     </td>
 
@@ -979,7 +1005,7 @@ const ProjectPlan = ({ project, canEdit }) => {
                       const isSelected = selectedCell?.taskId === task.id && selectedCell?.col === c.key;
                       return (
                         <td key={c.key}
-                          style={{ minWidth: colWidths[c.key] ?? c.width, width: colWidths[c.key] ?? c.width, left: frozenLeftOffsets[c.key], backgroundColor: fmt.bgColor || (task.milestone ? msColor.hex : '#ffffff') }}
+                          style={{ minWidth: colWidths[c.key] ?? c.width, width: colWidths[c.key] ?? c.width, left: frozenLeftOffsets[c.key], backgroundColor: fmt.bgColor || (isMsCol && task.milestone ? msColor.hex : '#ffffff') }}
                           className={`sticky z-10 border-r border-slate-100 px-2 py-1.5 ${isMsCol ? msColor.border : ''}`}>
                           {editCell?.taskId === task.id && editCell?.col === c.key
                             ? renderEditor(c, task)
@@ -1001,7 +1027,7 @@ const ProjectPlan = ({ project, canEdit }) => {
                       const fmt = getCellFmt(task, c.key);
                       return (
                         <td key={c.key}
-                          style={{ minWidth: colWidths[c.key] ?? c.width, width: colWidths[c.key] ?? c.width, backgroundColor: fmt.bgColor || (task.milestone ? msColor.hex : '#ffffff') }}
+                          style={{ minWidth: colWidths[c.key] ?? c.width, width: colWidths[c.key] ?? c.width, backgroundColor: fmt.bgColor || '#ffffff' }}
                           className="border-r border-slate-100 px-2 py-1.5">
                           {editCell?.taskId === task.id && editCell?.col === c.key
                             ? renderEditor(c, task)
@@ -1054,6 +1080,99 @@ const ProjectPlan = ({ project, canEdit }) => {
         </div>,
         document.body
       )}
+    </div>
+    {/* ── End Main Plan ── */}
+
+    {/* ── Side Panel ─────────────────────────────────────────────────── */}
+    <div className="w-72 flex-shrink-0 space-y-4" style={{ position: 'sticky', top: 16 }}>
+
+      {/* Today's Activities */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <CalendarDays size={15} className="text-blue-500" />
+          <h3 className="text-sm font-semibold text-slate-800">Today's Activities</h3>
+        </div>
+        {todayTasks.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">No activities due today.</p>
+        ) : (
+          <div className="space-y-2">
+            {todayTasks.map(t => (
+              <div key={t.id} className="text-xs bg-blue-50 rounded-lg p-2.5">
+                <p className="font-medium text-slate-800 leading-snug">{t.activities}</p>
+                <p className="text-slate-500 mt-0.5">{t.milestone}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Needs Immediate Action — delayed > 10 days */}
+      <div className="bg-white rounded-xl border border-red-200 shadow-sm p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <AlertCircle size={15} className="text-red-500" />
+          <h3 className="text-sm font-semibold text-slate-800">Needs Immediate Action</h3>
+        </div>
+        {urgentTasks.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">No activities delayed beyond 10 days.</p>
+        ) : (
+          <div className="space-y-2">
+            {urgentTasks.map(t => (
+              <div key={t.id} className="text-xs bg-red-50 border border-red-100 rounded-lg p-2.5">
+                <p className="font-medium text-slate-800 leading-snug">{t.activities}</p>
+                <p className="text-slate-500 mt-0.5">{t.milestone}</p>
+                <span className="inline-block mt-1 bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">
+                  {t.days_delay}d delayed
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* DM Action Items from Daily Call */}
+      <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Clock size={15} className="text-amber-500" />
+          <h3 className="text-sm font-semibold text-slate-800">Action Items</h3>
+          <span className="text-xs text-slate-400 ml-auto">Daily call</span>
+        </div>
+        <div className="space-y-3">
+          {dmActions.map((action, i) => (
+            <div key={i} className="space-y-1">
+              <input
+                type="text"
+                value={action.text}
+                onChange={e => {
+                  const updated = dmActions.map((a, idx) =>
+                    idx === i ? { ...a, text: e.target.value } : a
+                  );
+                  setDmActions(updated);
+                  try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
+                }}
+                placeholder={`Action ${i + 1}`}
+                className="w-full text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400"
+              />
+              <input
+                type="date"
+                value={action.byWhen}
+                onChange={e => {
+                  const updated = dmActions.map((a, idx) =>
+                    idx === i ? { ...a, byWhen: e.target.value } : a
+                  );
+                  setDmActions(updated);
+                  try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
+                }}
+                title="By when"
+                className="w-full text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-700 bg-white"
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+    </div>
+    {/* ── End Side Panel ── */}
+
     </div>
   );
 };

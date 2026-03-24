@@ -62,8 +62,8 @@ export default function TopBar({ onMenuClick }) {
 
         {dropdownOpen && (
           <>
-            <div className="fixed inset-0 z-10" onClick={() => setDropdownOpen(false)} />
-            <div className="absolute right-0 top-10 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-1">
+            <div className="fixed inset-0 z-50" onClick={() => setDropdownOpen(false)} />
+            <div className="absolute right-0 top-10 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-50 py-1">
               <div className="px-4 py-2 border-b border-gray-100">
                 <p className="text-sm font-medium text-gray-900">{profile?.full_name}</p>
                 <p className="text-xs text-gray-500">{profile?.email}</p>
