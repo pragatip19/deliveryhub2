@@ -60,12 +60,12 @@ function getPredecessorEnd(pred) {
   const todayDate = today();
 
   if (status === 'Done') {
-    const end = currentEnd || plannedEnd;
-    if (!end) return null;
-    // Predecessor finished in the past → successor can start no earlier than
-    // today, so cascade to today instead of the stale past date.
-    if (end < todayDate) return addWorkdays(todayDate, -1);
-    return end;
+    // Use the actual completion date (currentEnd), falling back to plannedEnd.
+    // Even if currentEnd is in the past, we cascade the real date — the
+    // successor's planned_start will then be in the past too, and calcDaysDelay
+    // will surface the delay automatically.  This also means early completion
+    // (currentEnd < delayed plannedEnd) correctly pulls the successor earlier.
+    return currentEnd || plannedEnd;
   }
   if (status === 'In Progress') {
     if (currentEnd && plannedEnd && currentEnd > plannedEnd) return currentEnd;

@@ -55,14 +55,14 @@ const BG_COLORS = [
 ];
 
 const MILESTONE_PALETTE = [
-  { bg: 'bg-blue-100',    text: 'text-blue-800',    border: 'border-l-2 border-blue-400',    rowTop: 'border-t-2 border-blue-200'    },
-  { bg: 'bg-violet-100',  text: 'text-violet-800',  border: 'border-l-2 border-violet-400',  rowTop: 'border-t-2 border-violet-200'  },
-  { bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-l-2 border-emerald-400', rowTop: 'border-t-2 border-emerald-200' },
-  { bg: 'bg-orange-100',  text: 'text-orange-800',  border: 'border-l-2 border-orange-400',  rowTop: 'border-t-2 border-orange-200'  },
-  { bg: 'bg-pink-100',    text: 'text-pink-800',    border: 'border-l-2 border-pink-400',    rowTop: 'border-t-2 border-pink-200'    },
-  { bg: 'bg-teal-100',    text: 'text-teal-800',    border: 'border-l-2 border-teal-400',    rowTop: 'border-t-2 border-teal-200'    },
-  { bg: 'bg-amber-100',   text: 'text-amber-800',   border: 'border-l-2 border-amber-400',   rowTop: 'border-t-2 border-amber-200'   },
-  { bg: 'bg-cyan-100',    text: 'text-cyan-800',    border: 'border-l-2 border-cyan-400',    rowTop: 'border-t-2 border-cyan-200'    },
+  { bg: 'bg-blue-100',    text: 'text-blue-800',    border: 'border-l-2 border-blue-400',    rowTop: 'border-t-2 border-blue-200',    hex: '#dbeafe' },
+  { bg: 'bg-violet-100',  text: 'text-violet-800',  border: 'border-l-2 border-violet-400',  rowTop: 'border-t-2 border-violet-200',  hex: '#ede9fe' },
+  { bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-l-2 border-emerald-400', rowTop: 'border-t-2 border-emerald-200', hex: '#d1fae5' },
+  { bg: 'bg-orange-100',  text: 'text-orange-800',  border: 'border-l-2 border-orange-400',  rowTop: 'border-t-2 border-orange-200',  hex: '#ffedd5' },
+  { bg: 'bg-pink-100',    text: 'text-pink-800',    border: 'border-l-2 border-pink-400',    rowTop: 'border-t-2 border-pink-200',    hex: '#fce7f3' },
+  { bg: 'bg-teal-100',    text: 'text-teal-800',    border: 'border-l-2 border-teal-400',    rowTop: 'border-t-2 border-teal-200',    hex: '#ccfbf1' },
+  { bg: 'bg-amber-100',   text: 'text-amber-800',   border: 'border-l-2 border-amber-400',   rowTop: 'border-t-2 border-amber-200',   hex: '#fef3c7' },
+  { bg: 'bg-cyan-100',    text: 'text-cyan-800',    border: 'border-l-2 border-cyan-400',    rowTop: 'border-t-2 border-cyan-200',    hex: '#cffafe' },
 ];
 
 const ProjectPlan = ({ project, canEdit }) => {
@@ -88,6 +88,29 @@ const ProjectPlan = ({ project, canEdit }) => {
   // Drag-to-reorder state
   const [dragId, setDragId]             = useState(null);
   const [dragOverId, setDragOverId]     = useState(null);
+
+  // Column resize state — per-key widths, initialised from COLUMNS defaults
+  const [colWidths, setColWidths]       = useState(() =>
+    Object.fromEntries(COLUMNS.map(c => [c.key, c.width]))
+  );
+  const resizingRef = useRef(null); // { key, startX, startW }
+
+  // Global mouse handlers for column resize
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!resizingRef.current) return;
+      const { key, startX, startW } = resizingRef.current;
+      const newW = Math.max(50, startW + (e.clientX - startX));
+      setColWidths(prev => ({ ...prev, [key]: newW }));
+    };
+    const onUp = () => { resizingRef.current = null; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup',   onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup',   onUp);
+    };
+  }, []);
 
   // Undo/redo
   const historyRef    = useRef([]);
@@ -538,9 +561,9 @@ const ProjectPlan = ({ project, canEdit }) => {
   const frozenLeftOffsets = useMemo(() => {
     const offsets = {};
     let left = ACTION_COL_W + ROW_NUM_W; // 48 (action col) + 32 (row#) = 80
-    frozenCols.forEach(c => { offsets[c.key] = left; left += c.width; });
+    frozenCols.forEach(c => { offsets[c.key] = left; left += (colWidths[c.key] ?? c.width); });
     return offsets;
-  }, [frozenCols]);
+  }, [frozenCols, colWidths]);
 
   // ── Export CSV ────────────────────────────────────────────────────────────────
   const handleExport = () => {
@@ -846,25 +869,41 @@ const ProjectPlan = ({ project, canEdit }) => {
                 {/* Row # */}
                 <th className="sticky z-30 border-r border-slate-200 px-2 py-2 text-slate-400 font-medium" style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W, backgroundColor: '#f8fafc' }}>#</th>
                 {/* Frozen cols */}
-                {frozenCols.map(c => (
-                  <th key={c.key}
-                    style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key], backgroundColor: '#f8fafc' }}
-                    className="sticky z-30 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
-                    <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
-                      {c.label}<ArrowUpDown size={10} className="opacity-40"/>
-                    </div>
-                  </th>
-                ))}
+                {frozenCols.map(c => {
+                  const w = colWidths[c.key] ?? c.width;
+                  return (
+                    <th key={c.key}
+                      style={{ minWidth: w, width: w, left: frozenLeftOffsets[c.key], backgroundColor: '#f8fafc', position: 'relative' }}
+                      className="sticky z-30 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
+                      <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
+                        {c.label}<ArrowUpDown size={10} className="opacity-40"/>
+                      </div>
+                      {/* Resize handle */}
+                      <div
+                        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity"
+                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
+                      />
+                    </th>
+                  );
+                })}
                 {/* Scrollable cols */}
-                {scrollCols.map(c => (
-                  <th key={c.key}
-                    style={{ minWidth: c.width, width: c.width }}
-                    className="bg-slate-50 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
-                    <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
-                      {c.label}<ArrowUpDown size={10} className="opacity-40"/>
-                    </div>
-                  </th>
-                ))}
+                {scrollCols.map(c => {
+                  const w = colWidths[c.key] ?? c.width;
+                  return (
+                    <th key={c.key}
+                      style={{ minWidth: w, width: w, position: 'relative' }}
+                      className="bg-slate-50 border-r border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
+                      <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
+                        {c.label}<ArrowUpDown size={10} className="opacity-40"/>
+                      </div>
+                      {/* Resize handle */}
+                      <div
+                        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity"
+                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
+                      />
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
 
@@ -894,7 +933,7 @@ const ProjectPlan = ({ project, canEdit }) => {
 
                     {/* Combined action col: drag handle + row menu (left side) */}
                     <td className="sticky z-10 border-r border-slate-100"
-                      style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W, backgroundColor: '#ffffff' }}
+                      style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W, backgroundColor: task.milestone ? msColor.hex : '#ffffff' }}
                       onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-between px-1 py-1.5">
                         {isDM && <GripVertical size={12} className="text-slate-300 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition flex-shrink-0"/>}
@@ -916,7 +955,7 @@ const ProjectPlan = ({ project, canEdit }) => {
 
                     {/* Row # */}
                     <td className="sticky z-10 border-r border-slate-100 px-2 py-1.5 text-center text-slate-400 font-medium"
-                      style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W, backgroundColor: '#ffffff' }}>
+                      style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W, backgroundColor: task.milestone ? msColor.hex : '#ffffff' }}>
                       {visualIdx + 1}
                     </td>
 
@@ -927,7 +966,7 @@ const ProjectPlan = ({ project, canEdit }) => {
                       const isSelected = selectedCell?.taskId === task.id && selectedCell?.col === c.key;
                       return (
                         <td key={c.key}
-                          style={{ minWidth: c.width, width: c.width, left: frozenLeftOffsets[c.key], backgroundColor: (!isMsCol && fmt.bgColor) ? fmt.bgColor : '#ffffff' }}
+                          style={{ minWidth: colWidths[c.key] ?? c.width, width: colWidths[c.key] ?? c.width, left: frozenLeftOffsets[c.key], backgroundColor: fmt.bgColor || (task.milestone ? msColor.hex : '#ffffff') }}
                           className={`sticky z-10 border-r border-slate-100 px-2 py-1.5 ${isMsCol ? msColor.border : ''}`}>
                           {editCell?.taskId === task.id && editCell?.col === c.key
                             ? renderEditor(c, task)
@@ -949,7 +988,7 @@ const ProjectPlan = ({ project, canEdit }) => {
                       const fmt = getCellFmt(task, c.key);
                       return (
                         <td key={c.key}
-                          style={{ minWidth: c.width, width: c.width, ...(fmt.bgColor ? { backgroundColor: fmt.bgColor } : {}) }}
+                          style={{ minWidth: colWidths[c.key] ?? c.width, width: colWidths[c.key] ?? c.width, backgroundColor: fmt.bgColor || (task.milestone ? msColor.hex : '#ffffff') }}
                           className="border-r border-slate-100 px-2 py-1.5">
                           {editCell?.taskId === task.id && editCell?.col === c.key
                             ? renderEditor(c, task)
