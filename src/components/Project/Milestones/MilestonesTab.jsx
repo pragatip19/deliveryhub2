@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Plus,
   Trash2,
+  MoreVertical,
   RefreshCw,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -16,8 +17,10 @@ import { formatDate, getWeekNumber } from '../../../lib/workdays';
 // ─── Default column widths (px) ────────────────────────────────────────────
 const COL_DEFAULTS = { num: 48, name: 224, status: 128, start: 112, end: 112 };
 const ROW_HEIGHT_DEFAULT = 64; // px
-const LS_COL_KEY = 'msColWidths';
-const LS_ROW_KEY = 'msRowHeight';
+const WEEK_COL_DEFAULT = 96;   // px (was min-w-24)
+const LS_COL_KEY  = 'msColWidths';
+const LS_ROW_KEY  = 'msRowHeight';
+const LS_WEEK_KEY = 'msWeekColWidth';
 
 function loadColWidths() {
   try {
@@ -26,7 +29,6 @@ function loadColWidths() {
   } catch {}
   return { ...COL_DEFAULTS };
 }
-
 function loadRowHeight() {
   try {
     const saved = localStorage.getItem(LS_ROW_KEY);
@@ -34,28 +36,42 @@ function loadRowHeight() {
   } catch {}
   return ROW_HEIGHT_DEFAULT;
 }
+function loadWeekColWidth() {
+  try {
+    const saved = localStorage.getItem(LS_WEEK_KEY);
+    if (saved) return Math.max(50, Number(saved));
+  } catch {}
+  return WEEK_COL_DEFAULT;
+}
 
 const MilestonesTab = ({ project, canEdit }) => {
-  const [milestones, setMilestones] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [editingName, setEditingName] = useState('');
+  const [milestones, setMilestones]     = useState([]);
+  const [tasks, setTasks]               = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [saving, setSaving]             = useState(false);
+  const [editingId, setEditingId]       = useState(null);
+  const [editingName, setEditingName]   = useState('');
+  const [openMenuId, setOpenMenuId]     = useState(null); // 3-dot menu state
 
   // Resize state
-  const [colWidths, setColWidths] = useState(loadColWidths);
-  const [rowHeight, setRowHeight] = useState(loadRowHeight);
-  const resizingColRef = useRef(null); // { key, startX, startW }
-  const resizingRowRef = useRef(null); // { startY, startH }
+  const [colWidths, setColWidths]       = useState(loadColWidths);
+  const [rowHeight, setRowHeight]       = useState(loadRowHeight);
+  const [weekColWidth, setWeekColWidth] = useState(loadWeekColWidth);
+
+  const resizingColRef  = useRef(null); // { key, startX, startW }
+  const resizingRowRef  = useRef(null); // { startY, startH }
+  const resizingWeekRef = useRef(null); // { startX, startW }
 
   // Persist resize to localStorage
   useEffect(() => {
-    try { localStorage.setItem(LS_COL_KEY, JSON.stringify(colWidths)); } catch {}
+    try { localStorage.setItem(LS_COL_KEY,  JSON.stringify(colWidths)); } catch {}
   }, [colWidths]);
   useEffect(() => {
-    try { localStorage.setItem(LS_ROW_KEY, String(rowHeight)); } catch {}
+    try { localStorage.setItem(LS_ROW_KEY,  String(rowHeight)); } catch {}
   }, [rowHeight]);
+  useEffect(() => {
+    try { localStorage.setItem(LS_WEEK_KEY, String(weekColWidth)); } catch {}
+  }, [weekColWidth]);
 
   // Global mouse handlers for resize drag
   useEffect(() => {
@@ -70,18 +86,32 @@ const MilestonesTab = ({ project, canEdit }) => {
         const newH = Math.max(32, startH + (e.clientY - startY));
         setRowHeight(newH);
       }
+      if (resizingWeekRef.current) {
+        const { startX, startW } = resizingWeekRef.current;
+        const newW = Math.max(50, startW + (e.clientX - startX));
+        setWeekColWidth(newW);
+      }
     };
     const onUp = () => {
-      resizingColRef.current = null;
-      resizingRowRef.current = null;
+      resizingColRef.current  = null;
+      resizingRowRef.current  = null;
+      resizingWeekRef.current = null;
     };
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mouseup',   onUp);
     return () => {
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mouseup',   onUp);
     };
   }, []);
+
+  // Close 3-dot menu on outside click
+  useEffect(() => {
+    if (!openMenuId) return;
+    const handler = () => setOpenMenuId(null);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [openMenuId]);
 
   // ─── Load data ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -110,12 +140,12 @@ const MilestonesTab = ({ project, canEdit }) => {
       const relatedTasks = tasks.filter((t) => t.milestone === milestone.name);
       if (!relatedTasks.length) return milestone;
       const starts = relatedTasks.map((t) => new Date(t.planned_start)).filter((d) => !isNaN(d));
-      const ends = relatedTasks.map((t) => new Date(t.planned_end)).filter((d) => !isNaN(d));
+      const ends   = relatedTasks.map((t) => new Date(t.planned_end)).filter((d) => !isNaN(d));
       if (!starts.length || !ends.length) return milestone;
       return {
         ...milestone,
         start_date: new Date(Math.min(...starts)),
-        end_date: new Date(Math.max(...ends)),
+        end_date:   new Date(Math.max(...ends)),
       };
     });
   }, [milestones, tasks]);
@@ -161,19 +191,19 @@ const MilestonesTab = ({ project, canEdit }) => {
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekEnd.getDate() + 6);
     const mStart = new Date(milestone.start_date);
-    const mEnd = new Date(milestone.end_date);
+    const mEnd   = new Date(milestone.end_date);
     return weekStart <= mEnd && weekEnd >= mStart;
   };
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'Done': return 'bg-green-400';
+      case 'Done':        return 'bg-green-400';
       case 'In Progress': return 'bg-yellow-400';
-      case 'Planned': return 'bg-blue-400';
-      case 'Blocked': return 'bg-red-400';
-      case 'Delayed': return 'bg-orange-400';
+      case 'Planned':     return 'bg-blue-400';
+      case 'Blocked':     return 'bg-red-400';
+      case 'Delayed':     return 'bg-orange-400';
       case 'Not Started': return 'bg-gray-300';
-      default: return 'bg-gray-200';
+      default:            return 'bg-gray-200';
     }
   };
 
@@ -261,6 +291,18 @@ const MilestonesTab = ({ project, canEdit }) => {
     />
   );
 
+  // ─── Gantt week column resize handle ─────────────────────────────────────
+  const WeekResizeHandle = () => (
+    <div
+      className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
+      onMouseDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resizingWeekRef.current = { startX: e.clientX, startW: weekColWidth };
+      }}
+    />
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -269,8 +311,9 @@ const MilestonesTab = ({ project, canEdit }) => {
     );
   }
 
-  // Helper for cell style
+  // Helper for fixed-width cell style
   const cellW = (key) => ({ width: colWidths[key], minWidth: colWidths[key], maxWidth: colWidths[key] });
+  const weekW = { width: weekColWidth, minWidth: weekColWidth };
 
   return (
     <div className="space-y-4 p-6 bg-gray-50 rounded-lg">
@@ -298,11 +341,11 @@ const MilestonesTab = ({ project, canEdit }) => {
             {/* Header Row */}
             <div className="sticky top-0 z-20 bg-gray-100 border-b border-gray-300 flex relative" style={{ height: 44 }}>
               {[
-                { key: 'num', label: '#' },
-                { key: 'name', label: 'Milestone' },
+                { key: 'num',    label: '#' },
+                { key: 'name',   label: 'Milestone' },
                 { key: 'status', label: 'Status' },
-                { key: 'start', label: 'Start Date' },
-                { key: 'end', label: 'End Date' },
+                { key: 'start',  label: 'Start Date' },
+                { key: 'end',    label: 'End Date' },
               ].map(({ key, label }) => (
                 <div
                   key={key}
@@ -313,6 +356,8 @@ const MilestonesTab = ({ project, canEdit }) => {
                   <ResizeHandle colKey={key} w={colWidths[key]} />
                 </div>
               ))}
+              {/* actions column header placeholder */}
+              {canEdit && <div style={{ width: 36 }} />}
               {/* Row height resize handle at header bottom */}
               <RowResizeHandle />
             </div>
@@ -325,7 +370,7 @@ const MilestonesTab = ({ project, canEdit }) => {
                 milestonesWithDates.map((milestone, index) => (
                   <div
                     key={milestone.id}
-                    className="border-b border-gray-200 hover:bg-blue-50 transition flex relative"
+                    className="border-b border-gray-200 flex relative"
                     style={{ height: rowHeight }}
                   >
                     {/* # */}
@@ -396,23 +441,47 @@ const MilestonesTab = ({ project, canEdit }) => {
 
                     {/* End Date */}
                     <div
-                      className="flex items-center px-3 text-xs text-gray-600 flex-shrink-0"
+                      className="flex items-center px-3 text-xs text-gray-600 border-r border-gray-200 flex-shrink-0"
                       style={cellW('end')}
                     >
                       {milestone.end_date ? formatDate(new Date(milestone.end_date)) : '—'}
                     </div>
 
-                    {/* Delete */}
+                    {/* ─── 3-dot Actions Menu ─── */}
                     {canEdit && (
-                      <div className="flex items-center px-2 flex-shrink-0">
+                      <div
+                        className="relative flex items-center justify-center flex-shrink-0"
+                        style={{ width: 36 }}
+                      >
                         <button
-                          onClick={() => handleDeleteMilestone(milestone.id)}
-                          disabled={saving}
-                          className="p-1 hover:bg-red-100 rounded transition disabled:opacity-50"
-                          title="Delete milestone"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuId(openMenuId === milestone.id ? null : milestone.id);
+                          }}
+                          className="p-1 hover:bg-gray-100 rounded transition"
+                          title="Actions"
                         >
-                          <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                          <MoreVertical className="w-4 h-4 text-gray-400" />
                         </button>
+                        {openMenuId === milestone.id && (
+                          <div
+                            className="absolute right-1 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50"
+                            style={{ minWidth: 120 }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                handleDeleteMilestone(milestone.id);
+                              }}
+                              disabled={saving}
+                              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Delete
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -427,20 +496,22 @@ const MilestonesTab = ({ project, canEdit }) => {
             <div className="sticky top-0 z-10 bg-gray-100 border-b border-gray-300" style={{ height: 44 }}>
               <div className="flex h-full">
                 {monthsRange.map((month) => {
-                  const monthWeeks = weeks.filter((w) => {
-                    return w.getFullYear() === month.getFullYear() && w.getMonth() === month.getMonth();
-                  });
+                  const monthWeeks = weeks.filter((w) =>
+                    w.getFullYear() === month.getFullYear() && w.getMonth() === month.getMonth()
+                  );
                   return (
                     <div key={month.toISOString()} className="flex border-r border-gray-300">
                       {monthWeeks.map((week) => (
                         <div
                           key={week.toISOString()}
-                          className="flex items-center justify-center min-w-24 px-2 font-semibold text-gray-700 text-xs border-r border-gray-300"
+                          className="relative flex items-center justify-center px-2 font-semibold text-gray-700 text-xs border-r border-gray-300"
+                          style={weekW}
                         >
                           <span className="text-gray-500 mr-1 text-xs">
                             {month.toLocaleString('default', { month: 'short' })}
                           </span>
-                          W{getWeekNumber(week)}
+                          W{weeks.indexOf(week) + 1}
+                          <WeekResizeHandle />
                         </div>
                       ))}
                     </div>
@@ -457,7 +528,7 @@ const MilestonesTab = ({ project, canEdit }) => {
                 milestonesWithDates.map((milestone) => (
                   <div
                     key={milestone.id}
-                    className="border-b border-gray-200 hover:bg-blue-50 transition flex"
+                    className="border-b border-gray-200 flex"
                     style={{ height: rowHeight }}
                   >
                     {monthsRange.map((month) => {
@@ -468,14 +539,15 @@ const MilestonesTab = ({ project, canEdit }) => {
                         <div key={month.toISOString()} className="flex border-r border-gray-300">
                           {monthWeeks.map((week) => {
                             const inMilestone = isWeekInMilestone(milestone, week);
-                            const bgColor = inMilestone ? getStatusColor(milestone.status || 'Planned') : 'bg-white';
                             return (
                               <div
                                 key={week.toISOString()}
-                                className={`min-w-24 border-r border-gray-200 flex items-center justify-center text-xs font-medium transition ${bgColor} ${
-                                  inMilestone ? 'text-gray-900' : 'text-gray-300'
+                                className={`border-r border-gray-200 flex items-center justify-center text-xs font-medium ${
+                                  inMilestone
+                                    ? `${getStatusColor(milestone.status || 'Planned')} text-gray-900`
+                                    : 'bg-white text-gray-300'
                                 }`}
-                                style={{ height: rowHeight }}
+                                style={{ ...weekW, height: rowHeight }}
                               >
                                 {inMilestone && milestone.status}
                               </div>
@@ -497,11 +569,11 @@ const MilestonesTab = ({ project, canEdit }) => {
         <h3 className="font-semibold text-gray-900 mb-3 text-sm">Status Legend</h3>
         <div className="flex flex-wrap gap-4 text-sm">
           {[
-            { label: 'Planned', cls: 'bg-blue-400' },
-            { label: 'Done', cls: 'bg-green-400' },
+            { label: 'Planned',     cls: 'bg-blue-400' },
+            { label: 'Done',        cls: 'bg-green-400' },
             { label: 'In Progress', cls: 'bg-yellow-400' },
-            { label: 'Blocked', cls: 'bg-red-400' },
-            { label: 'Delayed', cls: 'bg-orange-400' },
+            { label: 'Blocked',     cls: 'bg-red-400' },
+            { label: 'Delayed',     cls: 'bg-orange-400' },
             { label: 'Not Started', cls: 'bg-gray-300' },
           ].map(({ label, cls }) => (
             <div key={label} className="flex items-center gap-2">
@@ -511,7 +583,7 @@ const MilestonesTab = ({ project, canEdit }) => {
           ))}
         </div>
         <p className="text-xs text-gray-400 mt-2">
-          Drag column header right edge to resize columns · Drag bottom edge of header row to resize rows
+          Drag column header right edge to resize columns · Drag Gantt week header right edge to resize week columns · Drag bottom edge of header row to resize rows
         </p>
       </div>
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Routes, Route } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Routes, Route } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
@@ -29,7 +29,9 @@ const TABS = [
 ];
 
 export default function ProjectPage() {
-  const { id: projectId, tab } = useParams();
+  const { id: projectId } = useParams();
+  const location = useLocation();
+  const tab = location.pathname.split('/').pop();
   const navigate = useNavigate();
   const { user, canEditProject } = useAuth();
   const [project, setProject] = useState(null);
