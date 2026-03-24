@@ -285,14 +285,21 @@ export async function getSOWItems(projectId) {
 
 // Accepts both: upsertSOWItem(obj) or upsertSOWItem(projectId, itemId, updates)
 export async function upsertSOWItem(projectIdOrObj, itemId, updates) {
-  let item;
+  // 1-arg form: upsertSOWItem(obj) — used for new row inserts (handleAddRow)
   if (typeof projectIdOrObj === 'object' && projectIdOrObj !== null) {
-    item = projectIdOrObj;
-  } else {
-    item = { project_id: projectIdOrObj, ...updates };
-    if (itemId && !String(itemId).startsWith('temp-')) item.id = itemId;
+    const { data, error } = await supabase.from('sow_items').upsert(projectIdOrObj).select().single();
+    if (error) throw error;
+    return data;
   }
-  const { data, error } = await supabase.from('sow_items').upsert(item).select().single();
+  // 3-arg form: upsertSOWItem(projectId, itemId, updates) — auto-save of existing rows
+  // Use UPDATE (not upsert) to avoid partial-payload constraint issues on existing rows
+  const { data, error } = await supabase
+    .from('sow_items')
+    .update(updates)
+    .eq('id', itemId)
+    .eq('project_id', projectIdOrObj)
+    .select()
+    .single();
   if (error) throw error;
   return data;
 }
