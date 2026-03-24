@@ -894,6 +894,7 @@ const ProjectPlan = ({ project, canEdit }) => {
                       <div
                         className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
                         onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
+                        onClick={e => e.stopPropagation()}
                       />
                     </th>
                   );
@@ -912,6 +913,7 @@ const ProjectPlan = ({ project, canEdit }) => {
                       <div
                         className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
                         onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
+                        onClick={e => e.stopPropagation()}
                       />
                     </th>
                   );

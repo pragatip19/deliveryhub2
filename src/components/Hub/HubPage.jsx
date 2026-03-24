@@ -3,6 +3,7 @@ import { Search, Plus, MoreVertical, Filter, ArrowUpDown, X, ChevronDown } from 
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getProjects, getMyProjects, updateProject, deleteProject, getAllProfiles, getCategories } from '../../lib/supabase';
+import { addWorkdays, networkdays } from '../../lib/workdays';
 import NewProjectModal from './NewProjectModal';
 import toast from 'react-hot-toast';
 
@@ -28,20 +29,37 @@ function getProjectStatus(project) {
   return 'Not Started';
 }
 
+function getCategoryTargetDays(categoryName) {
+  if (!categoryName) return 72;
+  const n = categoryName.toLowerCase();
+  if (n === 'cleen') return 36;
+  if (n.includes('logbook')) return 60;
+  return 72;
+}
+
 function getProjectHealth(project) {
-  const { kickoff_date, planned_go_live, projected_go_live } = project;
-  if (!kickoff_date || !planned_go_live) return { status: 'Not Started', delayDays: 0, expectedPct: 0 };
-  const today    = new Date();
-  const kickoff  = new Date(kickoff_date);
-  const planned  = new Date(planned_go_live);
-  const totalMs  = Math.max(1, planned - kickoff);
-  const elapsedMs = today - kickoff;
-  const expectedPct = Math.min(100, Math.max(0, Math.round((elapsedMs / totalMs) * 100)));
+  const { kickoff_date, projected_go_live, category_name } = project;
+  if (!kickoff_date) return { status: 'Not Started', delayDays: 0, expectedPct: 0 };
+
+  const targetDays  = getCategoryTargetDays(category_name);
+  const kickoff     = new Date(kickoff_date);
+  const plannedGoLive = addWorkdays(kickoff, targetDays);   // same formula as ProjectHealth tab
+  const todayDate   = new Date();
+
+  // expected % = workdays elapsed / total workdays (kickoff → planned go-live)
+  const totalWd   = Math.max(1, networkdays(kickoff, plannedGoLive));
+  const elapsedWd = Math.max(0, networkdays(kickoff, todayDate));
+  const expectedPct = Math.min(100, Math.round((elapsedWd / totalWd) * 100));
+
   let delayDays = 0;
-  let status = 'On Track';
+  let status    = 'On Track';
   if (projected_go_live) {
-    delayDays = Math.ceil((new Date(projected_go_live) - planned) / 86400000);
-    if (delayDays > 0) status = 'Delayed';
+    const proj = new Date(projected_go_live);
+    if (proj > plannedGoLive) {
+      // match ProjectHealth: networkdays between baseline and projected
+      delayDays = Math.max(0, networkdays(plannedGoLive, proj) - 1);
+      status = 'Delayed';
+    }
   }
   return { status, delayDays, expectedPct };
 }
