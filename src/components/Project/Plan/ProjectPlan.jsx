@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Eye, Download, Plus, Trash2, ArrowUpDown, MoreVertical,
   Undo2, Redo2, ArrowDownToLine, ArrowUpToLine, Bold, Copy, Clipboard, Edit2, GripVertical,
-  Lock, LockOpen, Link2,
+  Lock, LockOpen, Link2, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import debounce from 'lodash.debounce';
@@ -24,7 +24,6 @@ const COLUMNS = [
   { key: 'milestone',              label: 'Milestone',            width: 160, frozen: true,  type: 'milestone' },
   { key: 'activities',             label: 'Activities',           width: 220, frozen: true,  type: 'text' },
   { key: 'tools',                  label: 'Tools',                width: 150, frozen: false, type: 'text' },
-  { key: 'doc_link',               label: 'Document Link',        width: 180, frozen: false, type: 'link' },
   { key: 'owner',                  label: 'Owner',                width: 150, frozen: false, type: 'people' },
   { key: 'status',                 label: 'Status',               width: 130, frozen: false, type: 'status' },
   { key: 'duration',               label: 'Duration',             width: 80,  frozen: false, type: 'number' },
@@ -91,6 +90,11 @@ const ProjectPlan = ({ project, canEdit }) => {
   // Drag-to-reorder state
   const [dragId, setDragId]             = useState(null);
   const [dragOverId, setDragOverId]     = useState(null);
+
+  // Hyperlink popover state
+  const [linkPopover, setLinkPopover] = useState(null); // { taskId, col } or null
+  const [linkText, setLinkText]       = useState('');
+  const [linkUrl, setLinkUrl]         = useState('');
 
   // Column resize state — per-key widths, persisted to localStorage
   const [colWidths, setColWidths] = useState(() => {
@@ -644,40 +648,34 @@ const ProjectPlan = ({ project, canEdit }) => {
       );
     }
     if (col.key === 'milestone') return null; // rendered separately with color badge
-    if (col.key === 'tools' && val) {
-      // Show any tools value as a hyperlink; auto-prefix https:// for bare domains/paths
-      const href = /^https?:\/\//i.test(val) ? val : `https://${val}`;
-      return (
-        <div style={wrapStyle} className={isSelected ? 'outline outline-2 outline-blue-500 rounded' : ''}>
-          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs truncate block">{val}</a>
-        </div>
-      );
+
+    // Detect [Display Text](url) markdown link format — works in ANY column
+    if (typeof val === 'string' && val) {
+      const mdLink = val.match(/^\[(.+?)\]\((.+?)\)$/);
+      if (mdLink) {
+        const [, displayText, rawHref] = mdLink;
+        const href = /^https?:\/\//i.test(rawHref) ? rawHref : `https://${rawHref}`;
+        return (
+          <div style={wrapStyle}
+            className={`flex items-center gap-1.5 ${isSelected ? 'outline outline-2 outline-blue-500 rounded' : ''}`}
+            {...clickProps}>
+            <a href={href} target="_blank" rel="noopener noreferrer"
+              className="text-blue-500 hover:text-blue-700 flex-shrink-0"
+              onClick={e => e.stopPropagation()} title={href}>
+              <Link2 size={12} />
+            </a>
+            <span className="text-xs text-blue-600 underline truncate">{displayText}</span>
+          </div>
+        );
+      }
     }
-    if (col.type === 'link') {
-      if (!val) return (
-        <div {...clickProps} style={wrapStyle} className={`${textCls} cursor-pointer`}>
-          <span className="text-gray-300">—</span>
-        </div>
-      );
+
+    if (col.key === 'tools' && val) {
+      // Show raw URL as a hyperlink; auto-prefix https:// for bare domains/paths
       const href = /^https?:\/\//i.test(val) ? val : `https://${val}`;
       return (
-        <div
-          style={wrapStyle}
-          className={`flex items-center gap-1.5 ${isSelected ? 'outline outline-2 outline-blue-500 rounded' : ''}`}
-          onClick={e => handleCellSingleClick(e, task.id, col.key, task)}
-          onDoubleClick={e => handleCellDoubleClick(e, task.id, col.key, task)}
-        >
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-500 hover:text-blue-700 flex-shrink-0"
-            onClick={e => e.stopPropagation()}
-            title={val}
-          >
-            <Link2 size={12} />
-          </a>
-          <span className="text-xs text-blue-600 underline truncate">{val}</span>
+        <div style={wrapStyle} className={isSelected ? 'outline outline-2 outline-blue-500 rounded' : ''} {...clickProps}>
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs truncate block" onClick={e => e.stopPropagation()}>{val}</a>
         </div>
       );
     }
@@ -872,10 +870,77 @@ const ProjectPlan = ({ project, canEdit }) => {
               </button>
             )}
 
+            <div className="w-px h-4 bg-slate-200 mx-0.5"/>
+
+            {/* Hyperlink */}
+            {isEditable(COLUMNS.find(c => c.key === selectedCell.col) || {}, selTask) && (
+              <button
+                onClick={() => {
+                  const val = selTask[selectedCell.col] ?? '';
+                  const match = typeof val === 'string' ? val.match(/^\[(.+?)\]\((.+?)\)$/) : null;
+                  setLinkText(match ? match[1] : String(val));
+                  setLinkUrl(match ? match[2] : '');
+                  setLinkPopover(linkPopover ? null : { taskId: selectedCell.taskId, col: selectedCell.col });
+                }}
+                title="Add / edit hyperlink"
+                className={`p-1.5 rounded transition ${linkPopover?.taskId === selectedCell.taskId && linkPopover?.col === selectedCell.col ? 'bg-blue-100 text-blue-700' : 'hover:bg-slate-100 text-slate-500'}`}
+              >
+                <Link2 size={13}/>
+              </button>
+            )}
+
             <div className="w-px h-4 bg-slate-200 mx-0.5 ml-auto"/>
             <span className="text-[10px] text-slate-400">
               {COLUMNS.find(c => c.key === selectedCell.col)?.label} · row {(sortedTasks.findIndex(t => t.id === selectedCell.taskId) + 1) || '?'}
             </span>
+          </div>
+        )}
+
+        {/* Hyperlink popover — row 3, shown when link button is active */}
+        {linkPopover && selectedCell && linkPopover.taskId === selectedCell.taskId && linkPopover.col === selectedCell.col && (
+          <div className="flex items-center gap-2 px-4 py-2 border-t border-slate-100 bg-white">
+            <Link2 size={12} className="text-blue-500 flex-shrink-0"/>
+            <input
+              type="text"
+              value={linkText}
+              onChange={e => setLinkText(e.target.value)}
+              placeholder="Display text"
+              className="px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 w-36 flex-shrink-0"
+            />
+            <input
+              type="text"
+              value={linkUrl}
+              onChange={e => setLinkUrl(e.target.value)}
+              placeholder="https://..."
+              className="px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 flex-1 min-w-0"
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const url = linkUrl.trim() ? (/^https?:\/\//i.test(linkUrl.trim()) ? linkUrl.trim() : `https://${linkUrl.trim()}`) : '';
+                  if (url) {
+                    const text = linkText.trim() || url;
+                    handleCellChange(linkPopover.taskId, linkPopover.col, `[${text}](${url})`);
+                  }
+                  setLinkPopover(null);
+                }
+                if (e.key === 'Escape') setLinkPopover(null);
+              }}
+              autoFocus
+            />
+            <button
+              onClick={() => {
+                const url = linkUrl.trim() ? (/^https?:\/\//i.test(linkUrl.trim()) ? linkUrl.trim() : `https://${linkUrl.trim()}`) : '';
+                if (url) {
+                  const text = linkText.trim() || url;
+                  handleCellChange(linkPopover.taskId, linkPopover.col, `[${text}](${url})`);
+                }
+                setLinkPopover(null);
+              }}
+              className="px-2.5 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 transition flex-shrink-0"
+            >Apply</button>
+            <button onClick={() => setLinkPopover(null)} className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 transition flex-shrink-0">
+              <X size={12}/>
+            </button>
           </div>
         )}
       </div>
@@ -914,17 +979,25 @@ const ProjectPlan = ({ project, canEdit }) => {
                   const w = colWidths[c.key] ?? c.width;
                   return (
                     <th key={c.key}
-                      style={{ minWidth: w, width: w, left: frozenLeftOffsets[c.key], backgroundColor: '#f8fafc' }}
-                      className="sticky z-30 border-r border-b border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
-                      <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
-                        {c.label}<ArrowUpDown size={10} className="opacity-40"/>
+                      style={{ minWidth: w, width: w, left: frozenLeftOffsets[c.key], backgroundColor: '#f8fafc', padding: 0 }}
+                      className="sticky z-30 border-r border-b border-slate-200 whitespace-nowrap">
+                      {/* Flex layout: label area + resize strip as siblings — no absolute positioning needed */}
+                      <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 36 }}>
+                        <div
+                          style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', cursor: 'pointer', userSelect: 'none', overflow: 'hidden' }}
+                          className="font-semibold text-slate-600 text-xs text-left"
+                          onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
+                          <span className="truncate">{c.label}</span>
+                          <ArrowUpDown size={10} className="opacity-40 flex-shrink-0"/>
+                        </div>
+                        {/* Resize strip — stretches full height via alignSelf: stretch (inherits from parent align-items: stretch) */}
+                        <div
+                          style={{ width: 6, flexShrink: 0, cursor: 'col-resize' }}
+                          className="hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity"
+                          onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
+                          onClick={e => e.stopPropagation()}
+                        />
                       </div>
-                      {/* Resize handle — top-0 bottom-0 stretches to full cell height without needing explicit height on th */}
-                      <div
-                        className="absolute top-0 bottom-0 right-0 w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
-                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
-                        onClick={e => e.stopPropagation()}
-                      />
                     </th>
                   );
                 })}
@@ -933,17 +1006,23 @@ const ProjectPlan = ({ project, canEdit }) => {
                   const w = colWidths[c.key] ?? c.width;
                   return (
                     <th key={c.key}
-                      style={{ minWidth: w, width: w, backgroundColor: '#f8fafc' }}
-                      className="relative border-r border-b border-slate-200 px-2 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
-                      <div className="flex items-center gap-1 cursor-pointer select-none" onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
-                        {c.label}<ArrowUpDown size={10} className="opacity-40"/>
+                      style={{ minWidth: w, width: w, backgroundColor: '#f8fafc', padding: 0 }}
+                      className="border-r border-b border-slate-200 whitespace-nowrap">
+                      <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 36 }}>
+                        <div
+                          style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', cursor: 'pointer', userSelect: 'none', overflow: 'hidden' }}
+                          className="font-semibold text-slate-600 text-xs text-left"
+                          onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
+                          <span className="truncate">{c.label}</span>
+                          <ArrowUpDown size={10} className="opacity-40 flex-shrink-0"/>
+                        </div>
+                        <div
+                          style={{ width: 6, flexShrink: 0, cursor: 'col-resize' }}
+                          className="hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity"
+                          onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
+                          onClick={e => e.stopPropagation()}
+                        />
                       </div>
-                      {/* Resize handle — top-0 bottom-0 stretches to full cell height */}
-                      <div
-                        className="absolute top-0 bottom-0 right-0 w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity z-10"
-                        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: c.key, startX: e.clientX, startW: w }; }}
-                        onClick={e => e.stopPropagation()}
-                      />
                     </th>
                   );
                 })}

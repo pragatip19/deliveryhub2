@@ -2,8 +2,9 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, Plus, MoreVertical, Filter, ArrowUpDown, X, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { getProjects, getMyProjects, updateProject, deleteProject, getAllProfiles, getCategories } from '../../lib/supabase';
+import { getProjects, getMyProjects, updateProject, deleteProject, getAllProfiles, getCategories, getPlanTasks } from '../../lib/supabase';
 import { addWorkdays, networkdays } from '../../lib/workdays';
+import { calcSOWCompletion } from '../../lib/calculations';
 import NewProjectModal from './NewProjectModal';
 import toast from 'react-hot-toast';
 
@@ -147,13 +148,33 @@ function EditProjectModal({ project, onClose, onSaved, dmProfiles, categories, c
 function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
-  const health = getProjectHealth(project);
+  const [sowData, setSowData] = useState(null);
 
   useEffect(() => {
     function handleClick(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
+
+  // Load tasks to compute SOW completion (same as ProjectHealth tab)
+  useEffect(() => {
+    if (!project?.id) return;
+    getPlanTasks(project.id).then(tasks => {
+      if (!tasks?.length) return;
+      const targetDays    = getCategoryTargetDays(project.category_name);
+      const kickoff       = project.kickoff_date ? new Date(project.kickoff_date) : null;
+      const projGoLive    = project.projected_go_live ? new Date(project.projected_go_live) : null;
+      const projectedDays = (kickoff && projGoLive)
+        ? Math.max(1, networkdays(kickoff, projGoLive))
+        : null;
+      setSowData(calcSOWCompletion(tasks, projectedDays || targetDays));
+    }).catch(() => {});
+  }, [project?.id]);
+
+  const currentSOW  = sowData?.current  ?? 0;
+  const expectedSOW = sowData?.expected ?? 0;
+  const sowDelta    = currentSOW - expectedSOW;
+  const hasKickoff  = !!project.kickoff_date;
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md transition-all cursor-pointer group"
@@ -190,29 +211,42 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
         )}
       </div>
 
-      {/* Health metric — Expected progress + on-track/delay status */}
+      {/* SOW Progress — Current % + Expected %, matching ProjectHealth tab */}
       <div className="mb-4">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs text-slate-500 font-medium">Expected Progress</span>
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-            health.status === 'On Track'    ? 'bg-emerald-100 text-emerald-700' :
-            health.status === 'Delayed'     ? 'bg-red-100 text-red-700' :
-                                              'bg-slate-100 text-slate-500'
-          }`}>
-            {health.status === 'Delayed' ? `${health.delayDays}d delayed` : health.status}
-          </span>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-slate-500 font-medium">SOW Progress</span>
+          {!hasKickoff ? (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Not Started</span>
+          ) : sowData ? (
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+              sowDelta >= 0 ? 'bg-emerald-100 text-emerald-700' :
+              sowDelta >= -10 ? 'bg-amber-100 text-amber-700' :
+              'bg-red-100 text-red-700'
+            }`}>
+              {sowDelta >= 0 ? `+${sowDelta.toFixed(1)}% ahead` : `${Math.abs(sowDelta).toFixed(1)}% behind`}
+            </span>
+          ) : (
+            <span className="text-xs text-slate-300">…</span>
+          )}
         </div>
-        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all ${
-              health.status === 'Delayed'     ? 'bg-red-400' :
-              health.status === 'On Track'    ? 'bg-emerald-400' :
-                                                'bg-slate-300'
-            }`}
-            style={{ width: `${health.expectedPct}%` }}
-          />
+        <div className="space-y-1.5">
+          {/* Current SOW */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-slate-500 w-16 shrink-0">Current %</span>
+            <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+              <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${Math.min(currentSOW, 100)}%` }} />
+            </div>
+            <span className="text-[10px] font-semibold text-emerald-700 w-10 text-right">{currentSOW.toFixed(1)}%</span>
+          </div>
+          {/* Expected SOW */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-slate-500 w-16 shrink-0">Expected %</span>
+            <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+              <div className="h-full bg-blue-400 rounded-full transition-all" style={{ width: `${Math.min(expectedSOW, 100)}%` }} />
+            </div>
+            <span className="text-[10px] font-semibold text-blue-600 w-10 text-right">{expectedSOW.toFixed(1)}%</span>
+          </div>
         </div>
-        <div className="text-right text-xs text-slate-400 mt-0.5">{health.expectedPct}% expected</div>
       </div>
 
       {/* Metrics */}
