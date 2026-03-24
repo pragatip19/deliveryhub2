@@ -332,47 +332,157 @@ const MilestonesTab = ({ project, canEdit }) => {
         )}
       </div>
 
-      {/* Gantt Chart */}
-      <div className="bg-white rounded-lg shadow overflow-hidden select-none">
-        <div className="flex overflow-hidden">
+      {/* Gantt Chart — single scroll container so scrollbar sits at the very bottom */}
+      <div className="bg-white rounded-lg shadow select-none overflow-hidden">
+        <div
+          className="overflow-x-auto overflow-y-auto"
+          style={{ maxHeight: 'calc(100vh - 320px)' }}
+        >
+          {/* Inner wrapper expands to full content width */}
+          <div style={{ minWidth: 'max-content' }}>
 
-          {/* ── Frozen Left Panel ─────────────────────────────────────── */}
-          <div className="flex-shrink-0 bg-white border-r border-gray-300" style={{ position: 'relative' }}>
-            {/* Header Row */}
-            <div className="sticky top-0 z-20 bg-gray-100 border-b border-gray-300 flex relative" style={{ height: 44 }}>
-              {[
-                { key: 'num',    label: '#' },
-                { key: 'name',   label: 'Milestone' },
-                { key: 'status', label: 'Status' },
-                { key: 'start',  label: 'Start Date' },
-                { key: 'end',    label: 'End Date' },
-              ].map(({ key, label }) => (
+            {/* ── Header row ───────────────────────────────────────────── */}
+            <div
+              className="sticky top-0 z-20 flex bg-gray-100 border-b border-gray-300"
+              style={{ height: 44 }}
+            >
+              {/* Frozen header cells — sticky left */}
+              <div
+                className="sticky left-0 z-30 flex bg-gray-100 border-r border-gray-300"
+                style={{ position: 'sticky' }}
+              >
+                {/* 3-dot column header (first column) */}
+                {canEdit && (
+                  <div
+                    className="flex items-center justify-center border-r border-gray-300"
+                    style={{ width: 36, minWidth: 36 }}
+                  />
+                )}
+                {/* # */}
                 <div
-                  key={key}
-                  className="relative flex items-center px-3 py-2 font-semibold text-gray-700 text-xs border-r border-gray-300 overflow-hidden"
-                  style={cellW(key)}
+                  className="relative flex items-center px-3 py-2 font-semibold text-gray-700 text-xs border-r border-gray-300"
+                  style={cellW('num')}
                 >
-                  <span className="truncate">{label}</span>
-                  <ResizeHandle colKey={key} w={colWidths[key]} />
+                  <span className="truncate">#</span>
+                  <ResizeHandle colKey="num" w={colWidths.num} />
                 </div>
-              ))}
-              {/* actions column header placeholder */}
-              {canEdit && <div style={{ width: 36 }} />}
-              {/* Row height resize handle at header bottom */}
-              <RowResizeHandle />
+                {/* Milestone */}
+                <div
+                  className="relative flex items-center px-3 py-2 font-semibold text-gray-700 text-xs border-r border-gray-300"
+                  style={cellW('name')}
+                >
+                  <span className="truncate">Milestone</span>
+                  <ResizeHandle colKey="name" w={colWidths.name} />
+                </div>
+                {/* Status */}
+                <div
+                  className="relative flex items-center px-3 py-2 font-semibold text-gray-700 text-xs border-r border-gray-300"
+                  style={cellW('status')}
+                >
+                  <span className="truncate">Status</span>
+                  <ResizeHandle colKey="status" w={colWidths.status} />
+                </div>
+                {/* Start Date */}
+                <div
+                  className="relative flex items-center px-3 py-2 font-semibold text-gray-700 text-xs border-r border-gray-300"
+                  style={cellW('start')}
+                >
+                  <span className="truncate">Start Date</span>
+                  <ResizeHandle colKey="start" w={colWidths.start} />
+                </div>
+                {/* End Date */}
+                <div
+                  className="relative flex items-center px-3 py-2 font-semibold text-gray-700 text-xs border-r border-gray-300"
+                  style={cellW('end')}
+                >
+                  <span className="truncate">End Date</span>
+                  <ResizeHandle colKey="end" w={colWidths.end} />
+                </div>
+                {/* Row height resize handle */}
+                <RowResizeHandle />
+              </div>
+
+              {/* Gantt week/month headers */}
+              {monthsRange.length === 0 ? (
+                <div className="flex items-center px-4 text-xs text-gray-400">No date range</div>
+              ) : (
+                monthsRange.map((month) => {
+                  const monthWeeks = weeks.filter(
+                    (w) => w.getFullYear() === month.getFullYear() && w.getMonth() === month.getMonth()
+                  );
+                  return (
+                    <div key={month.toISOString()} className="flex border-r border-gray-300">
+                      {monthWeeks.map((week) => (
+                        <div
+                          key={week.toISOString()}
+                          className="relative flex items-center justify-center px-2 font-semibold text-gray-700 text-xs border-r border-gray-300"
+                          style={weekW}
+                        >
+                          <span className="text-gray-500 mr-1 text-xs">
+                            {month.toLocaleString('default', { month: 'short' })}
+                          </span>
+                          W{weeks.indexOf(week) + 1}
+                          <WeekResizeHandle />
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })
+              )}
             </div>
 
-            {/* Data Rows */}
-            <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
-              {milestonesWithDates.length === 0 ? (
-                <div className="px-3 py-6 text-gray-500 text-sm text-center">No milestones yet</div>
-              ) : (
-                milestonesWithDates.map((milestone, index) => (
+            {/* ── Data rows ─────────────────────────────────────────────── */}
+            {milestonesWithDates.length === 0 ? (
+              <div className="px-3 py-6 text-gray-500 text-sm text-center">No milestones yet</div>
+            ) : (
+              milestonesWithDates.map((milestone, index) => (
+                <div
+                  key={milestone.id}
+                  className="border-b border-gray-200 flex"
+                  style={{ height: rowHeight }}
+                >
+                  {/* Frozen row cells — sticky left */}
                   <div
-                    key={milestone.id}
-                    className="border-b border-gray-200 flex relative"
-                    style={{ height: rowHeight }}
+                    className="sticky left-0 z-10 flex bg-white border-r border-gray-300 flex-shrink-0"
                   >
+                    {/* ─── 3-dot Actions Menu (FIRST column) ─── */}
+                    {canEdit && (
+                      <div
+                        className="relative flex items-center justify-center border-r border-gray-200 flex-shrink-0"
+                        style={{ width: 36, minWidth: 36 }}
+                      >
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuId(openMenuId === milestone.id ? null : milestone.id);
+                          }}
+                          className="p-1 hover:bg-gray-100 rounded transition"
+                          title="Actions"
+                        >
+                          <MoreVertical className="w-4 h-4 text-gray-400" />
+                        </button>
+                        {openMenuId === milestone.id && (
+                          <div
+                            className="absolute left-8 top-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-lg shadow-lg z-50"
+                            style={{ minWidth: 120 }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                handleDeleteMilestone(milestone.id);
+                              }}
+                              disabled={saving}
+                              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* # */}
                     <div
                       className="flex items-center justify-center px-3 text-sm text-gray-600 border-r border-gray-200 font-medium flex-shrink-0"
@@ -446,120 +556,37 @@ const MilestonesTab = ({ project, canEdit }) => {
                     >
                       {milestone.end_date ? formatDate(new Date(milestone.end_date)) : '—'}
                     </div>
+                  </div>
 
-                    {/* ─── 3-dot Actions Menu ─── */}
-                    {canEdit && (
-                      <div
-                        className="relative flex items-center justify-center flex-shrink-0"
-                        style={{ width: 36 }}
-                      >
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenMenuId(openMenuId === milestone.id ? null : milestone.id);
-                          }}
-                          className="p-1 hover:bg-gray-100 rounded transition"
-                          title="Actions"
-                        >
-                          <MoreVertical className="w-4 h-4 text-gray-400" />
-                        </button>
-                        {openMenuId === milestone.id && (
-                          <div
-                            className="absolute right-1 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50"
-                            style={{ minWidth: 120 }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              onClick={() => {
-                                setOpenMenuId(null);
-                                handleDeleteMilestone(milestone.id);
-                              }}
-                              disabled={saving}
-                              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg"
+                  {/* Gantt cells */}
+                  {monthsRange.map((month) => {
+                    const monthWeeks = weeks.filter(
+                      (w) => w.getFullYear() === month.getFullYear() && w.getMonth() === month.getMonth()
+                    );
+                    return (
+                      <div key={month.toISOString()} className="flex border-r border-gray-300">
+                        {monthWeeks.map((week) => {
+                          const inMilestone = isWeekInMilestone(milestone, week);
+                          return (
+                            <div
+                              key={week.toISOString()}
+                              className={`border-r border-gray-200 flex items-center justify-center text-xs font-medium ${
+                                inMilestone
+                                  ? `${getStatusColor(milestone.status || 'Planned')} text-gray-900`
+                                  : 'bg-white text-gray-300'
+                              }`}
+                              style={{ ...weekW, height: rowHeight }}
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              Delete
-                            </button>
-                          </div>
-                        )}
+                              {inMilestone && milestone.status}
+                            </div>
+                          );
+                        })}
                       </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* ── Scrollable Gantt Panel ──────────────────────────────────── */}
-          <div className="flex-1 overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
-            {/* Month + Week headers */}
-            <div className="sticky top-0 z-10 bg-gray-100 border-b border-gray-300" style={{ height: 44 }}>
-              <div className="flex h-full">
-                {monthsRange.map((month) => {
-                  const monthWeeks = weeks.filter((w) =>
-                    w.getFullYear() === month.getFullYear() && w.getMonth() === month.getMonth()
-                  );
-                  return (
-                    <div key={month.toISOString()} className="flex border-r border-gray-300">
-                      {monthWeeks.map((week) => (
-                        <div
-                          key={week.toISOString()}
-                          className="relative flex items-center justify-center px-2 font-semibold text-gray-700 text-xs border-r border-gray-300"
-                          style={weekW}
-                        >
-                          <span className="text-gray-500 mr-1 text-xs">
-                            {month.toLocaleString('default', { month: 'short' })}
-                          </span>
-                          W{weeks.indexOf(week) + 1}
-                          <WeekResizeHandle />
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Gantt Rows */}
-            <div>
-              {milestonesWithDates.length === 0 ? (
-                <div className="px-4 py-6 text-gray-500 text-sm">No milestones to display</div>
-              ) : (
-                milestonesWithDates.map((milestone) => (
-                  <div
-                    key={milestone.id}
-                    className="border-b border-gray-200 flex"
-                    style={{ height: rowHeight }}
-                  >
-                    {monthsRange.map((month) => {
-                      const monthWeeks = weeks.filter((w) =>
-                        w.getFullYear() === month.getFullYear() && w.getMonth() === month.getMonth()
-                      );
-                      return (
-                        <div key={month.toISOString()} className="flex border-r border-gray-300">
-                          {monthWeeks.map((week) => {
-                            const inMilestone = isWeekInMilestone(milestone, week);
-                            return (
-                              <div
-                                key={week.toISOString()}
-                                className={`border-r border-gray-200 flex items-center justify-center text-xs font-medium ${
-                                  inMilestone
-                                    ? `${getStatusColor(milestone.status || 'Planned')} text-gray-900`
-                                    : 'bg-white text-gray-300'
-                                }`}
-                                style={{ ...weekW, height: rowHeight }}
-                              >
-                                {inMilestone && milestone.status}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))
-              )}
-            </div>
+                    );
+                  })}
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
