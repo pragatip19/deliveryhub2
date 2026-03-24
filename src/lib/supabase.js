@@ -309,6 +309,11 @@ export async function deleteSOWItem(id) {
   if (error) throw error;
 }
 
+export async function deleteAllSOWItems(projectId) {
+  const { error } = await supabase.from('sow_items').delete().eq('project_id', projectId);
+  if (error) throw error;
+}
+
 export async function bulkUpsertSOWItems(items) {
   if (!items.length) return [];
   const { data, error } = await supabase.from('sow_items').upsert(items).select();

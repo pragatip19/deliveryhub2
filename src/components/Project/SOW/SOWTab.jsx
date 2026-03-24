@@ -6,6 +6,7 @@ import {
   bulkUpsertSOWItems,
   upsertSOWItem,
   deleteSOWItem,
+  deleteAllSOWItems,
   getSOWDropdownOptions,
   upsertSOWDropdownOption,
 } from '../../../lib/supabase';
@@ -214,12 +215,14 @@ const SOWTab = ({ project, canEdit }) => {
     const totalItems = sections.reduce((sum, s) => sum + s.items.length, 0);
     if (totalItems > 0) {
       const confirmed = window.confirm(
-        'This will add template rows alongside existing rows. Continue?'
+        'This will DELETE all existing SOW rows and replace them with the default template. Continue?'
       );
       if (!confirmed) return;
     }
     try {
       setSaving(true);
+      // Delete all existing rows first to prevent duplicates
+      await deleteAllSOWItems(project.id);
       const rows = SOW_TEMPLATE.map((row, idx) => ({
         ...row,
         project_id: project.id,
