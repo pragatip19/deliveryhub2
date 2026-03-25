@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Edit2, Save, X, AlertTriangle, Activity, TrendingUp, TrendingDown, Minus, Calendar, Target, Clock, AlertCircle, CalendarDays } from 'lucide-react';
+import { Edit2, Save, X, AlertTriangle, Activity, TrendingUp, TrendingDown, Minus, Calendar, Target, Clock, AlertCircle, CalendarDays, Plus, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getPlanTasks, updateProject, getRaidItems } from '../../../lib/supabase';
-import { calcSOWCompletion, getActiveTasks, getKickoffDate, getProjectedGoLive } from '../../../lib/calculations';
+import { calcSOWCompletion, getActiveTasks, getKickoffDate, getProjectedGoLive, recalculatePlan } from '../../../lib/calculations';
 import { networkdays, addWorkdays, formatDate, formatDateInput, today, parseDate } from '../../../lib/workdays';
 
 function getTargetDays(categoryName) {
@@ -92,10 +92,9 @@ export default function ProjectHealth({ project, canEdit }) {
     try {
       const saved = JSON.parse(localStorage.getItem(`dmActions_${project?.id}`) || '[]');
       const arr = Array.isArray(saved) ? saved : [];
-      while (arr.length < 5) arr.push({ text: '', byWhen: '' });
-      return arr.slice(0, 5);
+      return arr.length > 0 ? arr : [{ text: '', byWhen: '' }];
     } catch {
-      return Array.from({ length: 5 }, () => ({ text: '', byWhen: '' }));
+      return [{ text: '', byWhen: '' }];
     }
   });
 
@@ -110,7 +109,10 @@ export default function ProjectHealth({ project, canEdit }) {
           getRaidItems(project.id, 'risk').catch(() => []),
           getRaidItems(project.id, 'issue').catch(() => []),
         ]);
-        setTasks(tasksData || []);
+        // Recalculate so derived fields (days_delay, delay_status) are populated —
+        // they are stripped before DB saves in ProjectPlan so we must recompute here.
+        const calcTasks = tasksData?.length ? recalculatePlan(tasksData) : (tasksData || []);
+        setTasks(calcTasks);
         setOpenRisks((risks || []).filter(r => r.status !== 'Closed' && r.status !== 'Resolved').length);
         setOpenIssues((issues || []).filter(i => i.status !== 'Closed' && i.status !== 'Resolved').length);
       } catch { toast.error('Failed to load health data'); }
@@ -163,8 +165,15 @@ export default function ProjectHealth({ project, canEdit }) {
     [tasks, todayISO]
   );
   const urgentTasks = useMemo(() =>
-    tasks.filter(t => typeof t.days_delay === 'number' && t.days_delay > 10),
-    [tasks]
+    tasks.filter(t => {
+      if (t.status === 'Done' || t.status === 'Not Applicable') return false;
+      // days_delay > 10 (computed by recalculatePlan after load)
+      if (typeof t.days_delay === 'number' && t.days_delay > 10) return true;
+      // Not Started but planned_start is already in the past — should have started
+      if (t.status === 'Not Started' && t.planned_start && t.planned_start < todayISO) return true;
+      return false;
+    }),
+    [tasks, todayISO]
   );
 
   async function saveField(field, value) {
@@ -330,87 +339,73 @@ export default function ProjectHealth({ project, canEdit }) {
         </div>
       </div>
 
-      {/* ── Below SOW: Needs Immediate Action + DM Action Items ── */}
-      <div className="grid grid-cols-2 gap-4">
-
-        {/* Needs Immediate Action — delayed > 10 days */}
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertCircle size={14} className="text-red-500" />
-            <h3 className="text-sm font-semibold text-slate-800">Needs Immediate Action</h3>
-            {urgentTasks.length > 0 && (
-              <span className="ml-auto bg-red-100 text-red-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{urgentTasks.length}</span>
-            )}
-          </div>
-          {urgentTasks.length === 0 ? (
-            <p className="text-xs text-slate-400 italic">No activities delayed beyond 10 days.</p>
-          ) : (
-            <div className="space-y-2 max-h-52 overflow-y-auto">
-              {urgentTasks.map(t => (
-                <div key={t.id} className="bg-white rounded-lg p-2.5 border border-red-100">
-                  <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">{t.milestone}</p>
-                  <span className="inline-block mt-1 bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5 rounded font-semibold">
-                    +{t.days_delay}d delayed
-                  </span>
-                </div>
-              ))}
+      {/* ── DM Action Items — full width below SOW, dynamic rows ── */}
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Clock size={14} className="text-amber-500" />
+          <h3 className="text-sm font-semibold text-slate-800">DM Action Items</h3>
+          <span className="text-[10px] text-slate-400">from daily call</span>
+          <button
+            onClick={() => {
+              const updated = [...dmActions, { text: '', byWhen: '' }];
+              setDmActions(updated);
+              try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
+            }}
+            className="ml-auto flex items-center gap-1 px-2 py-1 text-[10px] bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg border border-amber-200 transition font-medium"
+          >
+            <Plus size={10}/> Add Row
+          </button>
+        </div>
+        <div className="space-y-2">
+          {dmActions.map((action, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="text-[10px] text-slate-400 w-4 shrink-0 text-right">{i + 1}.</span>
+              <input
+                type="text"
+                value={action.text}
+                onChange={e => {
+                  const updated = dmActions.map((a, idx) => idx === i ? { ...a, text: e.target.value } : a);
+                  setDmActions(updated);
+                  try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
+                }}
+                placeholder="Action item…"
+                className="flex-1 text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white"
+              />
+              <input
+                type="date"
+                value={action.byWhen}
+                onChange={e => {
+                  const updated = dmActions.map((a, idx) => idx === i ? { ...a, byWhen: e.target.value } : a);
+                  setDmActions(updated);
+                  try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
+                }}
+                className="text-xs px-2 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-700 bg-white w-32 shrink-0"
+              />
+              <button
+                onClick={() => {
+                  const updated = dmActions.filter((_, idx) => idx !== i);
+                  const final = updated.length ? updated : [{ text: '', byWhen: '' }];
+                  setDmActions(final);
+                  try { localStorage.setItem(dmActionsKey, JSON.stringify(final)); } catch {}
+                }}
+                className="p-1 text-slate-300 hover:text-red-500 transition shrink-0"
+                title="Remove row"
+              >
+                <Trash2 size={12}/>
+              </button>
             </div>
-          )}
+          ))}
         </div>
-
-        {/* DM Action Items */}
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Clock size={14} className="text-amber-500" />
-            <h3 className="text-sm font-semibold text-slate-800">DM Action Items</h3>
-            <span className="text-[10px] text-slate-400 ml-auto">from daily call</span>
-          </div>
-          <div className="space-y-3">
-            {dmActions.map((action, i) => (
-              <div key={i}>
-                <input
-                  type="text"
-                  value={action.text}
-                  onChange={e => {
-                    const updated = dmActions.map((a, idx) =>
-                      idx === i ? { ...a, text: e.target.value } : a
-                    );
-                    setDmActions(updated);
-                    try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
-                  }}
-                  placeholder={`Action ${i + 1}`}
-                  className="w-full text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white"
-                />
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span className="text-[10px] text-slate-500 font-medium shrink-0">Due:</span>
-                  <input
-                    type="date"
-                    value={action.byWhen}
-                    onChange={e => {
-                      const updated = dmActions.map((a, idx) =>
-                        idx === i ? { ...a, byWhen: e.target.value } : a
-                      );
-                      setDmActions(updated);
-                      try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
-                    }}
-                    className="flex-1 text-xs px-2 py-1 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-700 bg-white"
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
       </div>
-      {/* ── End below-SOW row ── */}
 
     </div>{/* end LEFT column */}
 
-    {/* ── RIGHT: Today's Activities — always visible, spans full page height ── */}
-    <div className="w-56 shrink-0">
-      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 sticky top-4">
-        <div className="flex items-center gap-2 mb-3">
+    {/* ── RIGHT: Today's Activities + Needs Immediate Action stacked, sticky, viewport-height ── */}
+    <div className="w-64 shrink-0 sticky top-4 flex flex-col gap-3" style={{ maxHeight: 'calc(100vh - 5rem)', overflow: 'hidden' }}>
+
+      {/* Today's Activities */}
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex flex-col min-h-0 flex-shrink-0" style={{ maxHeight: '45%' }}>
+        <div className="flex items-center gap-2 mb-2">
           <CalendarDays size={14} className="text-blue-500" />
           <h3 className="text-sm font-semibold text-slate-800">Today's Activities</h3>
           {todayTasks.length > 0 && (
@@ -420,16 +415,50 @@ export default function ProjectHealth({ project, canEdit }) {
         {todayTasks.length === 0 ? (
           <p className="text-xs text-slate-400 italic">No activities due today.</p>
         ) : (
-          <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="space-y-2 overflow-y-auto pr-1 flex-1">
             {todayTasks.map(t => (
               <div key={t.id} className="bg-white rounded-lg p-2.5 border border-blue-100">
                 <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
-                <p className="text-[10px] text-slate-500 mt-0.5">{t.milestone}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5 truncate">{fmtDate(t.planned_end)}</p>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Needs Immediate Action */}
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4 flex flex-col min-h-0 flex-1">
+        <div className="flex items-center gap-2 mb-2">
+          <AlertCircle size={14} className="text-red-500" />
+          <h3 className="text-sm font-semibold text-slate-800">Needs Immediate Action</h3>
+          {urgentTasks.length > 0 && (
+            <span className="ml-auto bg-red-100 text-red-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{urgentTasks.length}</span>
+          )}
+        </div>
+        {urgentTasks.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">No activities need immediate attention.</p>
+        ) : (
+          <div className="space-y-2 overflow-y-auto pr-1 flex-1">
+            {urgentTasks.map(t => (
+              <div key={t.id} className="bg-white rounded-lg p-2.5 border border-red-100">
+                <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
+                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                    t.status === 'Not Started' ? 'bg-gray-100 text-gray-600' : 'bg-orange-100 text-orange-700'
+                  }`}>{t.status}</span>
+                  {typeof t.days_delay === 'number' && t.days_delay > 0 && (
+                    <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">+{t.days_delay}d</span>
+                  )}
+                  {t.planned_start && t.planned_start < todayISO && t.status === 'Not Started' && (
+                    <span className="text-[10px] text-slate-400">Started {fmtDate(t.planned_start)}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
     </div>
 
     </div>{/* end outer flex */}
