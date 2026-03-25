@@ -157,13 +157,17 @@ export function calcDaysDelay(task) {
   const currentEnd = parseDate(task.current_end);
 
   if (status === 'Not Started') {
-    // Delay = working days past the planned end date (same measure as In Progress).
-    // This answers: "how many days overdue is this task right now?"
-    // planned_end is already cascaded forward by recalculatePlan when predecessors
-    // are delayed, so it reflects the dependency-adjusted deadline.
-    if (!plannedEnd) return 0;
-    if (todayDate <= plannedEnd) return 0;
-    return Math.max(0, networkdays(plannedEnd, todayDate) - 1);
+    // Use baseline_planned_end as the reference so we measure delay vs the
+    // ORIGINAL plan — not the cascaded planned_end (which moves to today/future
+    // when a predecessor is overdue, making the delay appear as 0).
+    // Falls back to planned_end for tasks that have no baseline yet.
+    const baselineEnd = parseDate(task.baseline_planned_end);
+    const reference = (baselineEnd && baselineEnd < (plannedEnd || todayDate))
+      ? baselineEnd
+      : plannedEnd;
+    if (!reference) return 0;
+    if (todayDate <= reference) return 0;
+    return Math.max(0, networkdays(reference, todayDate) - 1);
   }
   if (status === 'In Progress') {
     if (!plannedEnd) return 0;
