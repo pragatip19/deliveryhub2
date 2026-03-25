@@ -94,6 +94,9 @@ const ProjectPlan = ({ project, canEdit }) => {
   // Multi-row selection for bulk delete
   const [selectedRows, setSelectedRows] = useState(new Set());
 
+  // Custom milestone color picker portal
+  const [milestonePicker, setMilestonePicker] = useState(null); // { taskId, x, y } or null
+
   // Hyperlink popover state
   const [linkPopover, setLinkPopover] = useState(null); // { taskId, col } or null
   const [linkText, setLinkText]       = useState('');
@@ -282,6 +285,8 @@ const ProjectPlan = ({ project, canEdit }) => {
     const h = (e) => {
       // Close the portal row-action menu if clicking outside it
       if (!e.target.closest('[data-row-menu]')) setOpenMenu(null);
+      // Close milestone picker if clicking outside it
+      if (!e.target.closest('[data-milestone-picker]')) setMilestonePicker(null);
       if (!e.target.closest('[data-plan-table]') && !e.target.closest('[data-format-toolbar]')) {
         setSelectedCell(null);
       }
@@ -545,9 +550,17 @@ const ProjectPlan = ({ project, canEdit }) => {
   const handleCellSingleClick = (e, taskId, colKey, task) => {
     const col = COLUMNS.find(c => c.key === colKey);
     if (!col) return;
+    // Milestone: open custom colored picker portal instead of plain <select>
+    if (colKey === 'milestone' && isEditable(col, task)) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setMilestonePicker({ taskId, x: rect.left, y: rect.bottom + 2 });
+      setSelectedCell({ taskId, col: colKey });
+      setEditCell(null);
+      return;
+    }
     if (isEditable(col, task)) {
-      // All editable cells (dropdowns, text, number, date) go straight to edit
-      // mode on a single click so the user can paste/type immediately.
+      // All other editable cells go straight to edit mode on single click
+      // so the user can paste/type immediately.
       setEditCell({ taskId, col: colKey });
       setSelectedCell({ taskId, col: colKey }); // keep selected for format toolbar
       return;
@@ -586,14 +599,21 @@ const ProjectPlan = ({ project, canEdit }) => {
   useEffect(() => { sortedTasksRef.current = sortedTasks; }, [sortedTasks]);
 
   // ── Milestone color map ───────────────────────────────────────────────────────
+  // Primary map: stable per-milestone color based on the milestones array order
+  // so colors are consistent regardless of task order.
   const milestoneColorMap = useMemo(() => {
-    const map = {}; let idx = 0;
-    sortedTasks.forEach(t => {
-      const key = t.milestone || '__none__';
-      if (!map[key]) { map[key] = MILESTONE_PALETTE[idx % MILESTONE_PALETTE.length]; idx++; }
+    const map = {};
+    milestones.forEach((m, idx) => {
+      map[m.id] = MILESTONE_PALETTE[idx % MILESTONE_PALETTE.length];
     });
+    // Fallback for tasks with no milestone (renders row top-border + badge)
+    map['__none__'] = MILESTONE_PALETTE[0];
     return map;
-  }, [sortedTasks]);
+  }, [milestones]);
+
+  // Helper: get palette entry for a milestone ID (never returns undefined)
+  const getMilestoneColor = (milestoneId) =>
+    (milestoneId && milestoneColorMap[milestoneId]) ? milestoneColorMap[milestoneId] : MILESTONE_PALETTE[0];
 
   // ── Frozen column left offsets (cumulative) ───────────────────────────────────
   const frozenCols = COLUMNS.filter(c => c.frozen  && visibleCols[c.key] !== false);
@@ -1085,8 +1105,7 @@ const ProjectPlan = ({ project, canEdit }) => {
             {/* Body */}
             <tbody>
               {sortedTasks.map((task, visualIdx) => {
-                const msKey    = task.milestone || '__none__';
-                const msColor  = milestoneColorMap[msKey] || MILESTONE_PALETTE[0];
+                const msColor  = getMilestoneColor(task.milestone);
                 const prevKey  = visualIdx > 0 ? (sortedTasks[visualIdx-1].milestone || '__none__') : null;
                 const isNewGroup  = visualIdx > 0 && msKey !== prevKey;
                 const isDragging  = dragId === task.id;
@@ -1212,6 +1231,44 @@ const ProjectPlan = ({ project, canEdit }) => {
         <button onClick={handleAddRow} className="px-4 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg flex items-center gap-2 text-sm font-medium border border-emerald-200 transition">
           <Plus size={15}/> Add Row
         </button>
+      )}
+
+      {/* ── Milestone color picker portal ── */}
+      {milestonePicker && createPortal(
+        <div
+          data-milestone-picker
+          style={{ position: 'fixed', top: milestonePicker.y, left: milestonePicker.x, zIndex: 99999, minWidth: 200, maxHeight: 320, overflowY: 'auto' }}
+          className="bg-white border border-slate-200 rounded-lg shadow-2xl py-1 text-xs"
+          onMouseDown={e => e.stopPropagation()}
+        >
+          {/* None option */}
+          <button
+            onClick={() => {
+              handleCellChange(milestonePicker.taskId, 'milestone', '');
+              setMilestonePicker(null);
+            }}
+            className="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-400 flex items-center gap-2">
+            — None
+          </button>
+          <div className="border-t border-slate-100 my-0.5"/>
+          {milestones.map(m => {
+            const color = getMilestoneColor(m.id);
+            const task = tasks.find(t => t.id === milestonePicker.taskId);
+            const isActive = task?.milestone === m.id;
+            return (
+              <button key={m.id}
+                onClick={() => {
+                  handleCellChange(milestonePicker.taskId, 'milestone', m.id);
+                  setMilestonePicker(null);
+                }}
+                className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2 ${isActive ? 'bg-slate-50' : ''}`}>
+                <span className={`px-2 py-0.5 rounded text-xs font-semibold ${color.bg} ${color.text}`}>{m.name}</span>
+                {isActive && <span className="text-slate-400 text-[10px] ml-auto">✓</span>}
+              </button>
+            );
+          })}
+        </div>,
+        document.body
       )}
 
       {/* ── Row action menu — rendered as a portal so it escapes sticky z-index stacking contexts ── */}
