@@ -121,7 +121,9 @@ export default function ProjectHealth({ project, canEdit }) {
 
   // ── Derived values ────────────────────────────────────────────────────────────
   const categoryName = localProject?.category_name || '';
-  const targetDays   = getTargetDays(categoryName);
+  // Admin-overridable: if target_sow_completion_days is set on the project, use it;
+  // otherwise fall back to the category-based benchmark.
+  const targetDays   = localProject?.target_sow_completion_days || getTargetDays(categoryName);
 
   const kickoffFromPlan = getKickoffDate(tasks);
   const kickoffDate     = localProject?.kickoff_date || kickoffFromPlan;
@@ -200,7 +202,14 @@ export default function ProjectHealth({ project, canEdit }) {
       {/* ── Row 1: Target SOW Days · PO Date · Kickoff Date · Planned Go-Live ── */}
       <div className="grid grid-cols-4 gap-3">
         <StatCard icon={Target} iconColor="text-indigo-600" bg="bg-indigo-50 border-indigo-100" accent="bg-indigo-100"
-          label="Target SOW Days" value={`${targetDays}d`} sub={`${categoryName || 'Default'} benchmark`}
+          label="Target SOW Days" value={`${targetDays}d`}
+          sub={localProject?.target_sow_completion_days ? 'Custom override' : `${categoryName || 'Default'} benchmark`}
+          editable={canEdit}
+          onEdit={() => { setEditing('target_sow_completion_days'); setEditVal(String(targetDays)); }}
+          editing={editing === 'target_sow_completion_days'}
+          editValue={editVal} onEditChange={setEditVal} type="number"
+          onSave={() => saveField('target_sow_completion_days', parseInt(editVal) || null)}
+          onCancel={() => setEditing(null)}
         />
         <StatCard icon={Calendar} iconColor="text-slate-500" bg="bg-slate-50 border-slate-200" accent="bg-slate-100"
           label="PO Date" value={fmtDate(localProject?.po_date)}
