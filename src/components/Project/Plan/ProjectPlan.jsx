@@ -212,6 +212,11 @@ const ProjectPlan = ({ project, canEdit }) => {
   // ── Keyboard shortcuts ────────────────────────────────────────────────────────
   useEffect(() => {
     const h = (e) => {
+      // Don't intercept shortcuts when the user is typing inside any input/textarea/select
+      // (e.g. the hyperlink URL popover, edit cell inputs, etc.)
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
       const ctrl = e.metaKey || e.ctrlKey;
       if (ctrl && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
       if (ctrl && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return; }

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getProjects, getMyProjects, updateProject, deleteProject, getAllProfiles, getCategories, getPlanTasks } from '../../lib/supabase';
 import { addWorkdays, networkdays } from '../../lib/workdays';
-import { calcSOWCompletion } from '../../lib/calculations';
+import { calcSOWCompletion, getKickoffDate, getProjectedGoLive } from '../../lib/calculations';
 import NewProjectModal from './NewProjectModal';
 import toast from 'react-hot-toast';
 
@@ -148,7 +148,9 @@ function EditProjectModal({ project, onClose, onSaved, dmProfiles, categories, c
 function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
-  const [sowData, setSowData] = useState(null);
+  const [sowData, setSowData]               = useState(null);
+  const [taskKickoff, setTaskKickoff]       = useState(null); // kickoff derived from tasks
+  const [taskProjGoLive, setTaskProjGoLive] = useState(null); // projected go-live from Release System task
 
   useEffect(() => {
     function handleClick(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); }
@@ -156,14 +158,19 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  // Load tasks to compute SOW completion (same as ProjectHealth tab)
+  // Load tasks — derive kickoff, projected go-live, and SOW completion exactly like ProjectHealth
   useEffect(() => {
     if (!project?.id) return;
     getPlanTasks(project.id).then(tasks => {
       if (!tasks?.length) return;
-      const targetDays    = getCategoryTargetDays(project.category_name);
-      const kickoff       = project.kickoff_date ? new Date(project.kickoff_date) : null;
-      const projGoLive    = project.projected_go_live ? new Date(project.projected_go_live) : null;
+      const kickoffStr   = project.kickoff_date || getKickoffDate(tasks);
+      const projGoLiveStr = getProjectedGoLive(tasks) || project.projected_go_live;
+      setTaskKickoff(kickoffStr || null);
+      setTaskProjGoLive(projGoLiveStr || null);
+
+      const kickoff    = kickoffStr    ? new Date(kickoffStr)    : null;
+      const projGoLive = projGoLiveStr ? new Date(projGoLiveStr) : null;
+      const targetDays = getCategoryTargetDays(project.category_name);
       const projectedDays = (kickoff && projGoLive)
         ? Math.max(1, networkdays(kickoff, projGoLive))
         : null;
@@ -171,10 +178,12 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
     }).catch(() => {});
   }, [project?.id]);
 
-  const currentSOW  = sowData?.current  ?? 0;
+  const goLiveDate = taskProjGoLive || project.projected_go_live || project.planned_go_live;
+  const currentSOW = sowData?.current  ?? 0;
   const expectedSOW = sowData?.expected ?? 0;
-  const sowDelta    = currentSOW - expectedSOW;
-  const hasKickoff  = !!project.kickoff_date;
+  const sowDelta   = currentSOW - expectedSOW;
+  // "Not Started" = Release System task has no projected go-live yet (plan not kicked off)
+  const hasProjectedGoLive = !!(taskProjGoLive || project.projected_go_live);
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md transition-all cursor-pointer group"
@@ -211,9 +220,9 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
         )}
       </div>
 
-      {/* Status — SOW delta (Current % vs Expected %) */}
+      {/* Status — driven by projected go-live existence + SOW delta */}
       <div className="mb-4">
-        {!hasKickoff ? (
+        {!hasProjectedGoLive ? (
           <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">
             Not Started
           </span>
@@ -244,9 +253,7 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-slate-500">Go-Live</span>
-          <span className="font-medium text-slate-800">
-            {fmtDate(project.projected_go_live || project.planned_go_live)}
-          </span>
+          <span className="font-medium text-slate-800">{fmtDate(goLiveDate)}</span>
         </div>
         {project.kickoff_date && (
           <div className="flex items-center justify-between text-sm">
