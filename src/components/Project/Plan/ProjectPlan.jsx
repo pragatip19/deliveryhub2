@@ -669,14 +669,15 @@ const ProjectPlan = ({ project, canEdit }) => {
         const href = /^https?:\/\//i.test(rawHref) ? rawHref : `https://${rawHref}`;
         return (
           <div style={wrapStyle}
-            className={`flex items-center gap-1.5 ${isSelected ? 'outline outline-2 outline-blue-500 rounded' : ''}`}
+            className={`flex items-center ${isSelected ? 'outline outline-2 outline-blue-500 rounded' : ''}`}
             {...clickProps}>
+            {/* Wrap both icon AND text in the <a> so clicking anywhere on the link opens it */}
             <a href={href} target="_blank" rel="noopener noreferrer"
-              className="text-blue-500 hover:text-blue-700 flex-shrink-0"
+              className="flex items-center gap-1 text-blue-600 hover:text-blue-800 min-w-0"
               onClick={e => e.stopPropagation()} title={href}>
-              <Link2 size={12} />
+              <Link2 size={12} className="flex-shrink-0" />
+              <span className="text-xs underline truncate">{displayText}</span>
             </a>
-            <span className="text-xs text-blue-600 underline truncate">{displayText}</span>
           </div>
         );
       }
