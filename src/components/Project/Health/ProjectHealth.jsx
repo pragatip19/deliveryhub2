@@ -166,8 +166,12 @@ export default function ProjectHealth({ project, canEdit }) {
 
   const todayISO    = new Date().toISOString().split('T')[0];
   const todayTasks  = useMemo(() =>
-    tasks.filter(t => t.planned_end === todayISO || t.current_end === todayISO),
-    [tasks, todayISO]
+    // Show In Progress tasks (actively being worked on) — excludes Done/NA
+    // and avoids flooding from Not Started tasks whose planned_end cascaded to today
+    tasks.filter(t =>
+      t.status === 'In Progress' && t.status !== 'Not Applicable'
+    ),
+    [tasks]
   );
   const urgentTasks = useMemo(() =>
     tasks.filter(t => {
@@ -365,7 +369,7 @@ export default function ProjectHealth({ project, canEdit }) {
           <span className="w-6 shrink-0" />
           <span className="flex-1 text-[10px] text-slate-400 font-medium">Action Item</span>
           <span className="w-28 shrink-0 text-[10px] text-slate-400 font-medium">Status</span>
-          <span className="w-28 shrink-0 text-[10px] text-slate-400 font-medium">By When</span>
+          <span className="w-28 shrink-0 text-[10px] text-slate-400 font-medium">Due Date</span>
           <span className="w-40 shrink-0 text-[10px] text-slate-400 font-medium">Impact / Effect</span>
         </div>
         <div className="space-y-2">
@@ -442,7 +446,7 @@ export default function ProjectHealth({ project, canEdit }) {
                   type="text"
                   value={action.impact || ''}
                   onChange={e => updateField('impact', e.target.value)}
-                  placeholder="Impact / effect…"
+                  placeholder="Impact / effect observed…"
                   className="w-40 shrink-0 text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white"
                 />
               </div>
