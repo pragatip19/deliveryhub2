@@ -68,7 +68,12 @@ function getPredecessorEnd(pred) {
     return currentEnd || plannedEnd;
   }
   if (status === 'In Progress') {
+    // If an explicit current_end is set and extends past planned_end, use it
     if (currentEnd && plannedEnd && currentEnd > plannedEnd) return currentEnd;
+    // No current_end override: if planned_end is already in the past, cascade from
+    // today — the task is still running past its deadline so successors inherit today
+    // as the earliest possible start
+    if (plannedEnd && plannedEnd < todayDate) return todayDate;
     return plannedEnd;
   }
   // Not Started or Blocked
