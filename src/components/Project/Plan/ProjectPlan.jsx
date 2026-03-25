@@ -91,6 +91,9 @@ const ProjectPlan = ({ project, canEdit }) => {
   const [dragId, setDragId]             = useState(null);
   const [dragOverId, setDragOverId]     = useState(null);
 
+  // Multi-row selection for bulk delete
+  const [selectedRows, setSelectedRows] = useState(new Set());
+
   // Hyperlink popover state
   const [linkPopover, setLinkPopover] = useState(null); // { taskId, col } or null
   const [linkText, setLinkText]       = useState('');
@@ -424,6 +427,23 @@ const ProjectPlan = ({ project, canEdit }) => {
     } catch (e) { toast.error('Failed to delete: ' + (e.message || '')); }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedRows.size === 0) return;
+    if (!window.confirm(`Delete ${selectedRows.size} selected row${selectedRows.size > 1 ? 's' : ''}?`)) return;
+    try {
+      const ids = [...selectedRows];
+      await Promise.all(
+        ids
+          .filter(id => !String(id).startsWith('temp-'))
+          .map(id => deletePlanTask(id))
+      );
+      const updated = tasks.filter(t => !selectedRows.has(t.id));
+      setTasks(updated); pushHistory(updated);
+      setSelectedRows(new Set());
+      toast.success(`${ids.length} row${ids.length > 1 ? 's' : ''} deleted`);
+    } catch (e) { toast.error('Delete failed: ' + (e.message || '')); }
+  };
+
   // ── Drag-to-reorder ───────────────────────────────────────────────────────────
   function handleRowReorder(fromId, toId) {
     if (!fromId || fromId === toId) { setDragId(null); setDragOverId(null); return; }
@@ -525,13 +545,14 @@ const ProjectPlan = ({ project, canEdit }) => {
   const handleCellSingleClick = (e, taskId, colKey, task) => {
     const col = COLUMNS.find(c => c.key === colKey);
     if (!col) return;
-    // Dropdowns go straight to edit on single click
-    if (['status', 'owner', 'milestone'].includes(colKey) && isEditable(col, task)) {
+    if (isEditable(col, task)) {
+      // All editable cells (dropdowns, text, number, date) go straight to edit
+      // mode on a single click so the user can paste/type immediately.
       setEditCell({ taskId, col: colKey });
-      setSelectedCell(null);
+      setSelectedCell({ taskId, col: colKey }); // keep selected for format toolbar
       return;
     }
-    // Select cell → highlight it (format toolbar is in top bar, not floating)
+    // Non-editable: just select (highlights cell, shows format toolbar)
     setSelectedCell({ taskId, col: colKey });
     setEditCell(null);
   };
@@ -799,7 +820,14 @@ const ProjectPlan = ({ project, canEdit }) => {
                   </button>
             )}
           </div>
-          <p className="text-xs text-slate-400 hidden md:block">{tasks.length} rows · click=select · dbl-click=edit · drag=reorder</p>
+          {selectedRows.size > 0 ? (
+            <button onClick={handleBulkDelete}
+              className="px-2.5 py-1 text-xs bg-red-50 text-red-700 hover:bg-red-100 rounded-lg flex items-center gap-1.5 border border-red-200 transition font-medium">
+              <Trash2 size={13}/> Delete {selectedRows.size} row{selectedRows.size > 1 ? 's' : ''}
+            </button>
+          ) : (
+            <p className="text-xs text-slate-400 hidden md:block">{tasks.length} rows · click=edit · drag grip=reorder</p>
+          )}
         </div>
 
         {/* Row 2: format toolbar — visible only when a cell is selected */}
@@ -982,8 +1010,21 @@ const ProjectPlan = ({ project, canEdit }) => {
             {/* Header */}
             <thead className="sticky top-0 z-20" style={{ backgroundColor: '#f8fafc' }}>
               <tr className="bg-slate-50 border-b-2 border-slate-200">
-                {/* Combined action col: drag handle + row menu */}
-                <th className="sticky z-30 border-r border-slate-200" style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W, backgroundColor: '#f8fafc' }} />
+                {/* Combined action col: drag handle + row menu + select-all checkbox */}
+                <th className="sticky z-30 border-r border-slate-200" style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W, backgroundColor: '#f8fafc' }}>
+                  {isDM && (
+                    <div className="flex items-center justify-center h-full">
+                      <input type="checkbox" title="Select all"
+                        checked={sortedTasks.length > 0 && sortedTasks.every(t => selectedRows.has(t.id))}
+                        onChange={e => {
+                          if (e.target.checked) setSelectedRows(new Set(sortedTasks.map(t => t.id)));
+                          else setSelectedRows(new Set());
+                        }}
+                        className="w-3 h-3 rounded cursor-pointer"
+                      />
+                    </div>
+                  )}
+                </th>
                 {/* Row # */}
                 <th className="sticky z-30 border-r border-slate-200 px-2 py-2 text-slate-400 font-medium" style={{ left: ACTION_COL_W, width: ROW_NUM_W, minWidth: ROW_NUM_W, backgroundColor: '#f8fafc' }}>#</th>
                 {/* Frozen cols */}
@@ -1053,8 +1094,12 @@ const ProjectPlan = ({ project, canEdit }) => {
 
                 return (
                   <tr key={task.id||visualIdx}
-                    draggable={isDM}
-                    onDragStart={() => setDragId(task.id)}
+                    draggable={isDM && editCell?.taskId !== task.id}
+                    onDragStart={e => {
+                      // Only allow drag when the mousedown originated from the grip handle
+                      if (!e.target.closest('[data-drag-handle]')) { e.preventDefault(); return; }
+                      setDragId(task.id);
+                    }}
                     onDragOver={e => { e.preventDefault(); setDragOverId(task.id); }}
                     onDrop={e => { e.preventDefault(); handleRowReorder(dragId, task.id); }}
                     onDragEnd={() => { setDragId(null); setDragOverId(null); }}
@@ -1065,12 +1110,27 @@ const ProjectPlan = ({ project, canEdit }) => {
                       isDragOver    ? 'border-t-2 border-blue-400 bg-blue-50/30' : '',
                     ].join(' ')}>
 
-                    {/* Combined action col: drag handle + row menu (left side) */}
+                    {/* Combined action col: checkbox + drag handle + row menu (left side) */}
                     <td className="sticky z-10 border-r border-slate-100"
                       style={{ left: 0, width: ACTION_COL_W, minWidth: ACTION_COL_W, backgroundColor: '#ffffff' }}
                       onClick={e => e.stopPropagation()}>
-                      <div className="flex items-center justify-between px-1 py-1.5">
-                        {isDM && <GripVertical size={12} className="text-slate-300 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition flex-shrink-0"/>}
+                      <div className="flex items-center justify-between px-1 py-1.5 gap-0.5">
+                        {isDM && (
+                          <input type="checkbox"
+                            checked={selectedRows.has(task.id)}
+                            onChange={e => {
+                              const next = new Set(selectedRows);
+                              if (e.target.checked) next.add(task.id); else next.delete(task.id);
+                              setSelectedRows(next);
+                            }}
+                            className="w-3 h-3 rounded cursor-pointer flex-shrink-0"
+                          />
+                        )}
+                        {isDM && (
+                          <div data-drag-handle className="flex items-center">
+                            <GripVertical size={12} className="text-slate-300 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition flex-shrink-0"/>
+                          </div>
+                        )}
                         {isDM && (
                           <button
                             onMouseDown={e => e.stopPropagation()}
