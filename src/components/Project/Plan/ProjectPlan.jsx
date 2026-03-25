@@ -112,6 +112,9 @@ const ProjectPlan = ({ project, canEdit }) => {
     return defaults;
   });
   const resizingRef = useRef(null); // { key, startX, startW }
+  // Track whether the drag started from the grip handle (onDragStart e.target
+  // is always the <tr>, not the child that was mousedown'd).
+  const dragFromHandleRef = useRef(false);
 
   // Persist column widths to localStorage whenever they change
   useEffect(() => {
@@ -1121,8 +1124,11 @@ const ProjectPlan = ({ project, canEdit }) => {
                   <tr key={task.id||visualIdx}
                     draggable={isDM && editCell?.taskId !== task.id}
                     onDragStart={e => {
-                      // Only allow drag when the mousedown originated from the grip handle
-                      if (!e.target.closest('[data-drag-handle]')) { e.preventDefault(); return; }
+                      // Only allow drag when the mousedown originated from the grip handle.
+                      // (e.target is always the <tr> in dragstart, so we use a ref set by
+                      // the grip handle's onMouseDown instead of e.target.closest.)
+                      if (!dragFromHandleRef.current) { e.preventDefault(); return; }
+                      dragFromHandleRef.current = false;
                       setDragId(task.id);
                     }}
                     onDragOver={e => { e.preventDefault(); setDragOverId(task.id); }}
@@ -1152,7 +1158,9 @@ const ProjectPlan = ({ project, canEdit }) => {
                           />
                         )}
                         {isDM && (
-                          <div data-drag-handle className="flex items-center">
+                          <div data-drag-handle className="flex items-center"
+                            onMouseDown={() => { dragFromHandleRef.current = true; }}
+                            onMouseUp={() => { dragFromHandleRef.current = false; }}>
                             <GripVertical size={12} className="text-slate-300 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition flex-shrink-0"/>
                           </div>
                         )}
