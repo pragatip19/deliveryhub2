@@ -580,6 +580,13 @@ const ProjectPlan = ({ project, canEdit }) => {
     return offsets;
   }, [frozenCols, colWidths]);
 
+  // Total pixel width of the table — used with table-layout:fixed so the browser
+  // respects exact column widths rather than recalculating them automatically.
+  const totalTableWidth = useMemo(() => {
+    const allVis = COLUMNS.filter(c => visibleCols[c.key] !== false);
+    return ACTION_COL_W + ROW_NUM_W + allVis.reduce((s, c) => s + (colWidths[c.key] ?? c.width), 0);
+  }, [visibleCols, colWidths]);
+
   // ── Export CSV ────────────────────────────────────────────────────────────────
   const handleExport = () => {
     const visCols = COLUMNS.filter(c => visibleCols[c.key] !== false);
@@ -670,15 +677,6 @@ const ProjectPlan = ({ project, canEdit }) => {
       }
     }
 
-    if (col.key === 'tools' && val) {
-      // Show raw URL as a hyperlink; auto-prefix https:// for bare domains/paths
-      const href = /^https?:\/\//i.test(val) ? val : `https://${val}`;
-      return (
-        <div style={wrapStyle} className={isSelected ? 'outline outline-2 outline-blue-500 rounded' : ''} {...clickProps}>
-          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs truncate block" onClick={e => e.stopPropagation()}>{val}</a>
-        </div>
-      );
-    }
     return (
       <div {...clickProps} style={wrapStyle} className={`${textCls} cursor-pointer`}>
         {val ?? <span className="text-gray-300">—</span>}
@@ -966,7 +964,15 @@ const ProjectPlan = ({ project, canEdit }) => {
       {/* ── Table ── */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-plan-table>
         <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }} onPaste={handlePaste}>
-          <table className="w-full text-xs" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
+          {/* table-layout:fixed + explicit totalTableWidth means column widths are respected exactly,
+              making the resize handle dragging work correctly. */}
+          <table className="text-xs" style={{ borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed', width: totalTableWidth }}>
+            <colgroup>
+              <col style={{ width: ACTION_COL_W }} />
+              <col style={{ width: ROW_NUM_W }} />
+              {frozenCols.map(c => <col key={c.key} style={{ width: colWidths[c.key] ?? c.width }} />)}
+              {scrollCols.map(c => <col key={c.key} style={{ width: colWidths[c.key] ?? c.width }} />)}
+            </colgroup>
             {/* Header */}
             <thead className="sticky top-0 z-20" style={{ backgroundColor: '#f8fafc' }}>
               <tr className="bg-slate-50 border-b-2 border-slate-200">

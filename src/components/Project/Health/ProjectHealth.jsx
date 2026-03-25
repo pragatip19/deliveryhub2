@@ -181,7 +181,12 @@ export default function ProjectHealth({ project, canEdit }) {
   );
 
   return (
-    <div className="p-5 space-y-4 max-w-5xl">
+    <div className="p-5 max-w-7xl">
+    {/* Outer flex: main content left, Today's Activities pinned to the right */}
+    <div className="flex gap-4 items-start">
+
+    {/* ── LEFT: all metrics, SOW, urgent actions ── */}
+    <div className="flex-1 min-w-0 space-y-4">
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -270,41 +275,18 @@ export default function ProjectHealth({ project, canEdit }) {
 
         </div>
 
-        {/* Right sidebar: Risks + Issues + Today's Activities */}
-        <div className="w-64 shrink-0 flex flex-col gap-3">
-          {/* Risks & Issues side-by-side */}
-          <div className="grid grid-cols-2 gap-3">
-            <CountBox icon={AlertTriangle}
-              count={openRisks} label="Open Risks"
-              bg="bg-amber-50 border border-amber-200"
-              iconBg="bg-amber-100" iconColor="text-amber-600" textColor="text-amber-700"
-            />
-            <CountBox icon={Activity}
-              count={openIssues} label="Open Issues"
-              bg="bg-red-50 border border-red-200"
-              iconBg="bg-red-100" iconColor="text-red-600" textColor="text-red-700"
-            />
-          </div>
-
-          {/* Today's Activities — scrollable, fills remaining sidebar height */}
-          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex-1 overflow-y-auto" style={{ maxHeight: '16rem' }}>
-            <div className="flex items-center gap-2 mb-3">
-              <CalendarDays size={14} className="text-blue-500" />
-              <h3 className="text-sm font-semibold text-slate-800">Today's Activities</h3>
-            </div>
-            {todayTasks.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No activities due today.</p>
-            ) : (
-              <div className="space-y-2">
-                {todayTasks.map(t => (
-                  <div key={t.id} className="bg-white rounded-lg p-2.5 border border-blue-100">
-                    <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{t.milestone}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        {/* Right sidebar: Risks + Issues */}
+        <div className="w-36 flex flex-col gap-3 shrink-0">
+          <CountBox icon={AlertTriangle}
+            count={openRisks} label="Open Risks"
+            bg="bg-amber-50 border border-amber-200"
+            iconBg="bg-amber-100" iconColor="text-amber-600" textColor="text-amber-700"
+          />
+          <CountBox icon={Activity}
+            count={openIssues} label="Open Issues"
+            bg="bg-red-50 border border-red-200"
+            iconBg="bg-red-100" iconColor="text-red-600" textColor="text-red-700"
+          />
         </div>
 
       </div>
@@ -414,6 +396,34 @@ export default function ProjectHealth({ project, canEdit }) {
       </div>
       {/* ── End below-SOW row ── */}
 
+    </div>{/* end LEFT column */}
+
+    {/* ── RIGHT: Today's Activities — always visible, spans full page height ── */}
+    <div className="w-56 shrink-0">
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 sticky top-4">
+        <div className="flex items-center gap-2 mb-3">
+          <CalendarDays size={14} className="text-blue-500" />
+          <h3 className="text-sm font-semibold text-slate-800">Today's Activities</h3>
+          {todayTasks.length > 0 && (
+            <span className="ml-auto bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{todayTasks.length}</span>
+          )}
+        </div>
+        {todayTasks.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">No activities due today.</p>
+        ) : (
+          <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
+            {todayTasks.map(t => (
+              <div key={t.id} className="bg-white rounded-lg p-2.5 border border-blue-100">
+                <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">{t.milestone}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+
+    </div>{/* end outer flex */}
     </div>
   );
 }
