@@ -103,8 +103,8 @@ export default function ProjectPage() {
         </div>
       </div>
 
-      {/* Tab Navigation */}
-      <div className="bg-white border-b border-slate-200 sticky top-0 z-40">
+      {/* Tab Navigation — z-20 keeps it below the TopBar dropdown (z-30 stacking context) */}
+      <div className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="px-6 overflow-x-auto">
           <div className="flex gap-1">
             {TABS.map((tabItem) => (
