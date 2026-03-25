@@ -231,13 +231,13 @@ const MilestonesTab = ({ project, canEdit }) => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'Done':        return 'bg-green-400';
-      case 'In Progress': return 'bg-yellow-400';
-      case 'Planned':     return 'bg-blue-400';
-      case 'Blocked':     return 'bg-red-400';
-      case 'Delayed':     return 'bg-orange-400';
-      case 'Not Started': return 'bg-gray-300';
-      default:            return 'bg-gray-200';
+      case 'Done':        return 'bg-emerald-200';
+      case 'In Progress': return 'bg-amber-200';
+      case 'Planned':     return 'bg-blue-200';
+      case 'Blocked':     return 'bg-red-200';
+      case 'Delayed':     return 'bg-orange-200';
+      case 'Not Started': return 'bg-gray-200';
+      default:            return 'bg-gray-100';
     }
   };
 
@@ -647,12 +647,12 @@ const MilestonesTab = ({ project, canEdit }) => {
         <h3 className="font-semibold text-gray-900 mb-3 text-sm">Status Legend</h3>
         <div className="flex flex-wrap gap-4 text-sm">
           {[
-            { label: 'Planned',     cls: 'bg-blue-400' },
-            { label: 'Done',        cls: 'bg-green-400' },
-            { label: 'In Progress', cls: 'bg-yellow-400' },
-            { label: 'Blocked',     cls: 'bg-red-400' },
-            { label: 'Delayed',     cls: 'bg-orange-400' },
-            { label: 'Not Started', cls: 'bg-gray-300' },
+            { label: 'Planned',     cls: 'bg-blue-200' },
+            { label: 'Done',        cls: 'bg-emerald-200' },
+            { label: 'In Progress', cls: 'bg-amber-200' },
+            { label: 'Blocked',     cls: 'bg-red-200' },
+            { label: 'Delayed',     cls: 'bg-orange-200' },
+            { label: 'Not Started', cls: 'bg-gray-200' },
           ].map(({ label, cls }) => (
             <div key={label} className="flex items-center gap-2">
               <div className={`w-3 h-3 rounded ${cls}`} />

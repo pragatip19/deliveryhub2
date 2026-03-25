@@ -47,6 +47,9 @@ export function calcPlannedStart(task, allTasks) {
   const predEnd = getPredecessorEnd(predecessor);
   if (!predEnd) return task.planned_start ? parseDate(task.planned_start) : null;
 
+  const todayDate = today();
+  // If predecessor end is today or in the past, successor starts today (not +1 workday)
+  if (predEnd <= todayDate) return todayDate;
   return addWorkdays(predEnd, 1);
 }
 

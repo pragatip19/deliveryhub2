@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Edit2, Save, X, AlertTriangle, Activity, TrendingUp, TrendingDown, Minus, Calendar, Target, Clock, AlertCircle, CalendarDays, Plus, Trash2 } from 'lucide-react';
+import { Edit2, Save, X, AlertTriangle, Activity, TrendingUp, TrendingDown, Minus, Calendar, Target, Clock, AlertCircle, CalendarDays, Plus, MoreVertical } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getPlanTasks, updateProject, getRaidItems } from '../../../lib/supabase';
 import { calcSOWCompletion, getActiveTasks, getKickoffDate, getProjectedGoLive, recalculatePlan } from '../../../lib/calculations';
@@ -92,11 +92,16 @@ export default function ProjectHealth({ project, canEdit }) {
     try {
       const saved = JSON.parse(localStorage.getItem(`dmActions_${project?.id}`) || '[]');
       const arr = Array.isArray(saved) ? saved : [];
-      return arr.length > 0 ? arr : [{ text: '', byWhen: '' }];
+      const normalized = arr.map(a => ({
+        text: a.text || '', byWhen: a.byWhen || '',
+        status: a.status || 'Not Started', impact: a.impact || '',
+      }));
+      return normalized.length > 0 ? normalized : [{ text: '', byWhen: '', status: 'Not Started', impact: '' }];
     } catch {
-      return [{ text: '', byWhen: '' }];
+      return [{ text: '', byWhen: '', status: 'Not Started', impact: '' }];
     }
   });
+  const [dmMenuOpen, setDmMenuOpen] = useState(null);
 
   useEffect(() => { setLocalProject(project); }, [project]);
 
@@ -346,7 +351,7 @@ export default function ProjectHealth({ project, canEdit }) {
           <span className="text-[10px] text-slate-400">from daily call</span>
           <button
             onClick={() => {
-              const updated = [...dmActions, { text: '', byWhen: '' }];
+              const updated = [...dmActions, { text: '', byWhen: '', status: 'Not Started', impact: '' }];
               setDmActions(updated);
               try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
             }}
@@ -355,45 +360,94 @@ export default function ProjectHealth({ project, canEdit }) {
             <Plus size={10}/> Add Row
           </button>
         </div>
+        {/* Column headers */}
+        <div className="flex items-center gap-2 mb-1 px-1">
+          <span className="w-6 shrink-0" />
+          <span className="flex-1 text-[10px] text-slate-400 font-medium">Action Item</span>
+          <span className="w-28 shrink-0 text-[10px] text-slate-400 font-medium">Status</span>
+          <span className="w-28 shrink-0 text-[10px] text-slate-400 font-medium">By When</span>
+          <span className="w-40 shrink-0 text-[10px] text-slate-400 font-medium">Impact / Effect</span>
+        </div>
         <div className="space-y-2">
-          {dmActions.map((action, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <span className="text-[10px] text-slate-400 w-4 shrink-0 text-right">{i + 1}.</span>
-              <input
-                type="text"
-                value={action.text}
-                onChange={e => {
-                  const updated = dmActions.map((a, idx) => idx === i ? { ...a, text: e.target.value } : a);
-                  setDmActions(updated);
-                  try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
-                }}
-                placeholder="Action item…"
-                className="flex-1 text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white"
-              />
-              <input
-                type="date"
-                value={action.byWhen}
-                onChange={e => {
-                  const updated = dmActions.map((a, idx) => idx === i ? { ...a, byWhen: e.target.value } : a);
-                  setDmActions(updated);
-                  try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
-                }}
-                className="text-xs px-2 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-700 bg-white w-32 shrink-0"
-              />
-              <button
-                onClick={() => {
-                  const updated = dmActions.filter((_, idx) => idx !== i);
-                  const final = updated.length ? updated : [{ text: '', byWhen: '' }];
-                  setDmActions(final);
-                  try { localStorage.setItem(dmActionsKey, JSON.stringify(final)); } catch {}
-                }}
-                className="p-1 text-slate-300 hover:text-red-500 transition shrink-0"
-                title="Remove row"
-              >
-                <Trash2 size={12}/>
-              </button>
-            </div>
-          ))}
+          {dmActions.map((action, i) => {
+            const updateField = (field, val) => {
+              const updated = dmActions.map((a, idx) => idx === i ? { ...a, [field]: val } : a);
+              setDmActions(updated);
+              try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
+            };
+            const deleteRow = () => {
+              const updated = dmActions.filter((_, idx) => idx !== i);
+              const final = updated.length ? updated : [{ text: '', byWhen: '', status: 'Not Started', impact: '' }];
+              setDmActions(final);
+              setDmMenuOpen(null);
+              try { localStorage.setItem(dmActionsKey, JSON.stringify(final)); } catch {}
+            };
+            const statusColors = {
+              'Not Started': 'bg-gray-100 text-gray-600',
+              'In Progress': 'bg-amber-100 text-amber-700',
+              'Done': 'bg-emerald-100 text-emerald-700',
+            };
+            return (
+              <div key={i} className="flex items-center gap-2">
+                {/* Three-dots menu */}
+                <div className="relative shrink-0">
+                  <button
+                    onClick={() => setDmMenuOpen(dmMenuOpen === i ? null : i)}
+                    className="p-1 text-slate-400 hover:text-slate-600 transition rounded"
+                    title="Row options"
+                  >
+                    <MoreVertical size={13}/>
+                  </button>
+                  {dmMenuOpen === i && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setDmMenuOpen(null)} />
+                      <div className="absolute left-0 top-6 z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-24">
+                        <button
+                          onClick={deleteRow}
+                          className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {/* Action text */}
+                <input
+                  type="text"
+                  value={action.text}
+                  onChange={e => updateField('text', e.target.value)}
+                  placeholder="Action item…"
+                  className="flex-1 text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white"
+                />
+                {/* Status */}
+                <select
+                  value={action.status || 'Not Started'}
+                  onChange={e => updateField('status', e.target.value)}
+                  className={`w-28 shrink-0 text-xs px-1.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white font-medium ${statusColors[action.status] || 'text-slate-700'}`}
+                >
+                  <option value="Not Started">Not Started</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Done">Done</option>
+                </select>
+                {/* By When */}
+                <input
+                  type="date"
+                  value={action.byWhen}
+                  onChange={e => updateField('byWhen', e.target.value)}
+                  className="w-28 shrink-0 text-xs px-2 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-700 bg-white"
+                />
+                {/* Impact / Effect */}
+                <input
+                  type="text"
+                  value={action.impact || ''}
+                  onChange={e => updateField('impact', e.target.value)}
+                  placeholder="Impact / effect…"
+                  className="w-40 shrink-0 text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white"
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 
