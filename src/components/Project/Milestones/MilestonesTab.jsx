@@ -13,6 +13,30 @@ import {
   getPlanTasks,
 } from '../../../lib/supabase';
 import { formatDate, getWeekNumber } from '../../../lib/workdays';
+import { recalculatePlan } from '../../../lib/calculations';
+
+// ─── Milestone colour palette (matches ProjectPlan badge palette) ──────────
+const MILESTONE_COLORS = [
+  { bg: '#ccfbf1', text: '#0f766e', border: '#99f6e4' }, // teal
+  { bg: '#dbeafe', text: '#1d4ed8', border: '#bfdbfe' }, // blue
+  { bg: '#fce7f3', text: '#be185d', border: '#fbcfe8' }, // pink
+  { bg: '#fef3c7', text: '#92400e', border: '#fde68a' }, // amber
+  { bg: '#ede9fe', text: '#6d28d9', border: '#ddd6fe' }, // violet
+  { bg: '#dcfce7', text: '#15803d', border: '#bbf7d0' }, // green
+  { bg: '#fee2e2', text: '#b91c1c', border: '#fecaca' }, // red
+  { bg: '#ffedd5', text: '#c2410c', border: '#fed7aa' }, // orange
+];
+
+// Auto-derive milestone status from its tasks
+function deriveMilestoneStatus(tasks) {
+  if (!tasks.length) return null; // no tasks → keep manual status
+  const st = tasks.map(t => t.status);
+  if (st.every(s => s === 'Done' || s === 'Not Applicable')) return 'Done';
+  if (st.some(s => s === 'Blocked')) return 'Blocked';
+  if (st.some(s => s === 'In Progress')) return 'In Progress';
+  if (st.some(s => s === 'Done')) return 'In Progress'; // partial
+  return 'Not Started';
+}
 
 // ─── Default column widths (px) ────────────────────────────────────────────
 const COL_DEFAULTS = { num: 48, name: 224, status: 128, start: 112, end: 112 };
@@ -123,7 +147,9 @@ const MilestonesTab = ({ project, canEdit }) => {
           getPlanTasks(project.id),
         ]);
         setMilestones(milestonesData);
-        setTasks(tasksData);
+        // Recalculate so planned_start/end reflect cascaded delays
+        const calcTasks = tasksData?.length ? recalculatePlan(tasksData) : (tasksData || []);
+        setTasks(calcTasks);
       } catch (error) {
         console.error('Failed to load milestones:', error);
         toast.error('Failed to load milestones');
@@ -134,18 +160,26 @@ const MilestonesTab = ({ project, canEdit }) => {
     if (project?.id) loadData();
   }, [project?.id]);
 
-  // ─── Compute milestone date ranges from plan tasks ────────────────────────
+  // ─── Compute milestone date ranges + derived status from plan tasks ───────
   const milestonesWithDates = useMemo(() => {
-    return milestones.map((milestone) => {
-      const relatedTasks = tasks.filter((t) => t.milestone === milestone.name);
-      if (!relatedTasks.length) return milestone;
+    return milestones.map((milestone, idx) => {
+      // Match tasks by milestone UUID (id) OR by name string (template projects)
+      const relatedTasks = tasks.filter(
+        (t) => t.milestone === milestone.id || t.milestone === milestone.name
+      );
+      const color = MILESTONE_COLORS[idx % MILESTONE_COLORS.length];
+      if (!relatedTasks.length) return { ...milestone, color };
+
       const starts = relatedTasks.map((t) => new Date(t.planned_start)).filter((d) => !isNaN(d));
       const ends   = relatedTasks.map((t) => new Date(t.planned_end)).filter((d) => !isNaN(d));
-      if (!starts.length || !ends.length) return milestone;
+      const derived = deriveMilestoneStatus(relatedTasks);
+
       return {
         ...milestone,
-        start_date: new Date(Math.min(...starts)),
-        end_date:   new Date(Math.max(...ends)),
+        color,
+        start_date:    starts.length ? new Date(Math.min(...starts.map(d => d.getTime()))) : milestone.start_date,
+        end_date:      ends.length   ? new Date(Math.max(...ends.map(d => d.getTime())))   : milestone.end_date,
+        derivedStatus: derived,
       };
     });
   }, [milestones, tasks]);
@@ -491,7 +525,7 @@ const MilestonesTab = ({ project, canEdit }) => {
                       {index + 1}
                     </div>
 
-                    {/* Milestone Name */}
+                    {/* Milestone Name — coloured badge */}
                     <div
                       className="flex items-center px-3 border-r border-gray-200 overflow-hidden flex-shrink-0"
                       style={cellW('name')}
@@ -513,32 +547,48 @@ const MilestonesTab = ({ project, canEdit }) => {
                         <button
                           onClick={() => canEdit && (setEditingId(milestone.id), setEditingName(milestone.name))}
                           disabled={!canEdit}
-                          className="text-gray-900 font-medium text-sm hover:text-blue-600 disabled:cursor-default disabled:hover:text-gray-900 truncate w-full text-left"
+                          className="truncate w-full text-left"
+                          title={milestone.name}
                         >
-                          {milestone.name}
+                          <span
+                            className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold border truncate max-w-full"
+                            style={{
+                              backgroundColor: milestone.color?.bg,
+                              color: milestone.color?.text,
+                              borderColor: milestone.color?.border,
+                            }}
+                          >
+                            {milestone.name}
+                          </span>
                         </button>
                       )}
                     </div>
 
-                    {/* Status */}
+                    {/* Status — derived from tasks, manual override still available */}
                     <div
                       className="flex items-center px-3 border-r border-gray-200 flex-shrink-0"
                       style={cellW('status')}
                     >
-                      <select
-                        value={milestone.status || 'Not Started'}
-                        onChange={(e) => handleStatusChange(milestone.id, e.target.value)}
-                        disabled={!canEdit}
-                        className="px-2 py-1 border border-gray-300 rounded text-xs bg-white w-full hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <option value="Not Started">Not Started</option>
-                        <option value="In Progress">In Progress</option>
-                        <option value="Done">Done</option>
-                        <option value="Blocked">Blocked</option>
-                        <option value="Delayed">Delayed</option>
-                        <option value="Planned">Planned</option>
-                        <option value="Not Applicable">Not Applicable</option>
-                      </select>
+                      {milestone.derivedStatus ? (
+                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${getStatusColor(milestone.derivedStatus)} text-gray-800 w-full text-center`}>
+                          {milestone.derivedStatus}
+                        </span>
+                      ) : (
+                        <select
+                          value={milestone.status || 'Not Started'}
+                          onChange={(e) => handleStatusChange(milestone.id, e.target.value)}
+                          disabled={!canEdit}
+                          className="px-2 py-1 border border-gray-300 rounded text-xs bg-white w-full hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <option value="Not Started">Not Started</option>
+                          <option value="In Progress">In Progress</option>
+                          <option value="Done">Done</option>
+                          <option value="Blocked">Blocked</option>
+                          <option value="Delayed">Delayed</option>
+                          <option value="Planned">Planned</option>
+                          <option value="Not Applicable">Not Applicable</option>
+                        </select>
+                      )}
                     </div>
 
                     {/* Start Date */}
@@ -567,17 +617,18 @@ const MilestonesTab = ({ project, canEdit }) => {
                       <div key={month.toISOString()} className="flex border-r border-gray-300">
                         {monthWeeks.map((week) => {
                           const inMilestone = isWeekInMilestone(milestone, week);
+                          const displayStatus = milestone.derivedStatus || milestone.status || 'Not Started';
                           return (
                             <div
                               key={week.toISOString()}
                               className={`border-r border-gray-200 flex items-center justify-center text-xs font-medium ${
                                 inMilestone
-                                  ? `${getStatusColor(milestone.status || 'Planned')} text-gray-900`
+                                  ? `${getStatusColor(displayStatus)} text-gray-900`
                                   : 'bg-white text-gray-300'
                               }`}
                               style={{ ...weekW, height: rowHeight }}
                             >
-                              {inMilestone && milestone.status}
+                              {inMilestone && displayStatus}
                             </div>
                           );
                         })}

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getProjects, getMyProjects, updateProject, deleteProject, getAllProfiles, getCategories, getPlanTasks } from '../../lib/supabase';
 import { addWorkdays, networkdays } from '../../lib/workdays';
-import { calcSOWCompletion, getKickoffDate, getProjectedGoLive } from '../../lib/calculations';
+import { calcSOWCompletion, getKickoffDate, getProjectedGoLive, recalculatePlan } from '../../lib/calculations';
 import NewProjectModal from './NewProjectModal';
 import toast from 'react-hot-toast';
 
@@ -161,8 +161,10 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
   // Load tasks — derive kickoff, projected go-live, and SOW completion exactly like ProjectHealth
   useEffect(() => {
     if (!project?.id) return;
-    getPlanTasks(project.id).then(tasks => {
-      if (!tasks?.length) return;
+    getPlanTasks(project.id).then(rawTasks => {
+      if (!rawTasks?.length) return;
+      // Run recalculatePlan so planned_end, days_delay, etc. match the Health page
+      const tasks = recalculatePlan(rawTasks);
       const kickoffStr   = project.kickoff_date || getKickoffDate(tasks);
       const projGoLiveStr = getProjectedGoLive(tasks) || project.projected_go_live;
       setTaskKickoff(kickoffStr || null);
