@@ -211,42 +211,23 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
         )}
       </div>
 
-      {/* SOW Progress — Current % + Expected %, matching ProjectHealth tab */}
+      {/* Status — SOW delta (Current % vs Expected %) */}
       <div className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-slate-500 font-medium">SOW Progress</span>
-          {!hasKickoff ? (
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Not Started</span>
-          ) : sowData ? (
-            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-              sowDelta >= 0 ? 'bg-emerald-100 text-emerald-700' :
-              sowDelta >= -10 ? 'bg-amber-100 text-amber-700' :
-              'bg-red-100 text-red-700'
-            }`}>
-              {sowDelta >= 0 ? `+${sowDelta.toFixed(1)}% ahead` : `${Math.abs(sowDelta).toFixed(1)}% behind`}
-            </span>
-          ) : (
-            <span className="text-xs text-slate-300">…</span>
-          )}
-        </div>
-        <div className="space-y-1.5">
-          {/* Current SOW */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-500 w-16 shrink-0">Current %</span>
-            <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
-              <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${Math.min(currentSOW, 100)}%` }} />
-            </div>
-            <span className="text-[10px] font-semibold text-emerald-700 w-10 text-right">{currentSOW.toFixed(1)}%</span>
-          </div>
-          {/* Expected SOW */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-500 w-16 shrink-0">Expected %</span>
-            <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
-              <div className="h-full bg-blue-400 rounded-full transition-all" style={{ width: `${Math.min(expectedSOW, 100)}%` }} />
-            </div>
-            <span className="text-[10px] font-semibold text-blue-600 w-10 text-right">{expectedSOW.toFixed(1)}%</span>
-          </div>
-        </div>
+        {!hasKickoff ? (
+          <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">
+            Not Started
+          </span>
+        ) : !sowData ? (
+          <span className="text-xs text-slate-300">Loading…</span>
+        ) : sowDelta < 0 ? (
+          <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full bg-red-100 text-red-700">
+            {Math.abs(sowDelta).toFixed(1)}% delayed
+          </span>
+        ) : (
+          <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">
+            {sowDelta > 0.5 ? `+${sowDelta.toFixed(1)}% ahead` : 'On Track'}
+          </span>
+        )}
       </div>
 
       {/* Metrics */}
@@ -263,7 +244,9 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-slate-500">Go-Live</span>
-          <span className="font-medium text-slate-800">{fmtDate(project.planned_go_live)}</span>
+          <span className="font-medium text-slate-800">
+            {fmtDate(project.projected_go_live || project.planned_go_live)}
+          </span>
         </div>
         {project.kickoff_date && (
           <div className="flex items-center justify-between text-sm">
