@@ -1105,6 +1105,7 @@ const ProjectPlan = ({ project, canEdit }) => {
             {/* Body */}
             <tbody>
               {sortedTasks.map((task, visualIdx) => {
+                const msKey    = task.milestone || '__none__';
                 const msColor  = getMilestoneColor(task.milestone);
                 const prevKey  = visualIdx > 0 ? (sortedTasks[visualIdx-1].milestone || '__none__') : null;
                 const isNewGroup  = visualIdx > 0 && msKey !== prevKey;
