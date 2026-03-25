@@ -167,13 +167,12 @@ export default function ProjectHealth({ project, canEdit }) {
   const urgentTasks = useMemo(() =>
     tasks.filter(t => {
       if (t.status === 'Done' || t.status === 'Not Applicable') return false;
-      // days_delay > 10 (computed by recalculatePlan after load)
-      if (typeof t.days_delay === 'number' && t.days_delay > 10) return true;
-      // Not Started but planned_start is already in the past — should have started
-      if (t.status === 'Not Started' && t.planned_start && t.planned_start < todayISO) return true;
-      return false;
+      // days_delay is computed by recalculatePlan after load.
+      // For In Progress: delay = days past planned_end.
+      // For Not Started: delay = days past planned_end (cascade-adjusted via recalculatePlan).
+      return typeof t.days_delay === 'number' && t.days_delay > 10;
     }),
-    [tasks, todayISO]
+    [tasks]
   );
 
   async function saveField(field, value) {
@@ -313,7 +312,7 @@ export default function ProjectHealth({ project, canEdit }) {
       <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h3 className="text-sm font-semibold text-slate-700">SOW Completion</h3>
+            <h3 className="text-sm font-semibold text-slate-700">Projected SOW Completion %</h3>
             <p className="text-[10px] text-slate-400 mt-0.5">
               Denominator: {projectedOnboardingDays ? `${projectedOnboardingDays}d` : `${targetDays}d`} projected days
             </p>
@@ -449,8 +448,8 @@ export default function ProjectHealth({ project, canEdit }) {
                   {typeof t.days_delay === 'number' && t.days_delay > 0 && (
                     <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">+{t.days_delay}d</span>
                   )}
-                  {t.planned_start && t.planned_start < todayISO && t.status === 'Not Started' && (
-                    <span className="text-[10px] text-slate-400">Started {fmtDate(t.planned_start)}</span>
+                  {t.status === 'Not Started' && t.planned_end && (
+                    <span className="text-[10px] text-slate-400">Due {fmtDate(t.planned_end)}</span>
                   )}
                 </div>
               </div>

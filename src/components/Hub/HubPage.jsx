@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Search, Plus, MoreVertical, Filter, ArrowUpDown, X, ChevronDown } from 'lucide-react';
+import { Search, Plus, MoreVertical, Filter, ArrowUpDown, X, ChevronDown, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getProjects, getMyProjects, updateProject, deleteProject, getAllProfiles, getCategories, getPlanTasks } from '../../lib/supabase';
@@ -185,6 +185,12 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
   // "Not Started" = Release System task has no projected go-live yet (plan not kicked off)
   const hasProjectedGoLive = !!(taskProjGoLive || project.projected_go_live);
 
+  // Go-live on-track / delayed: compare projected go-live vs kickoff + target days
+  const targetDaysForGoLive = project.target_sow_completion_days || getCategoryTargetDays(project.category_name);
+  const plannedGoLiveDate = taskKickoff ? addWorkdays(new Date(taskKickoff), targetDaysForGoLive) : null;
+  const isGoLiveDelayed = !!(plannedGoLiveDate && taskProjGoLive &&
+    new Date(taskProjGoLive) > plannedGoLiveDate);
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md transition-all cursor-pointer group"
       onClick={() => onNavigate(project.id)}>
@@ -192,9 +198,22 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0 pr-2">
           <h3 className="text-base font-semibold text-slate-900 truncate mb-1">{project.name}</h3>
-          <span className="inline-block bg-slate-100 text-slate-600 text-xs font-medium px-2.5 py-0.5 rounded-full">
-            {project.category_name || '—'}
-          </span>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="inline-block bg-slate-100 text-slate-600 text-xs font-medium px-2.5 py-0.5 rounded-full">
+              {project.category_name || '—'}
+            </span>
+            {hasProjectedGoLive && (
+              isGoLiveDelayed ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">
+                  <AlertCircle size={9} /> Go-Live Delayed
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">
+                  <CheckCircle2 size={9} /> Go-Live On Track
+                </span>
+              )
+            )}
+          </div>
         </div>
         {canEdit && (
           <div ref={menuRef} className="relative flex-shrink-0" onClick={e => e.stopPropagation()}>
@@ -220,8 +239,9 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
         )}
       </div>
 
-      {/* Status — driven by projected go-live existence + SOW delta */}
+      {/* Projected SOW Completion % status badge */}
       <div className="mb-4">
+        <p className="text-[10px] text-slate-400 mb-1 font-medium">Projected SOW Completion %</p>
         {!hasProjectedGoLive ? (
           <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">
             Not Started
@@ -230,7 +250,7 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
           <span className="text-xs text-slate-300">Loading…</span>
         ) : sowDelta < 0 ? (
           <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full bg-red-100 text-red-700">
-            {Math.abs(sowDelta).toFixed(1)}% delayed
+            {Math.abs(sowDelta).toFixed(1)}% behind
           </span>
         ) : (
           <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">
