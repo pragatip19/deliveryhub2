@@ -351,6 +351,15 @@ const ProjectPlan = ({ project, canEdit }) => {
         task.status = 'In Progress';
       }
       if (colKey === 'current_end' && value) { task.status = 'Done'; }
+      // Clearing current_end: revert Done → In Progress (or Not Started if no actual_start).
+      // This ensures downstream tasks re-anchor to planned_end rather than the old current_end.
+      if (colKey === 'current_end' && !value && task.status === 'Done') {
+        task.status = task.actual_start ? 'In Progress' : 'Not Started';
+      }
+      // Clearing actual_start: revert In Progress → Not Started
+      if (colKey === 'actual_start' && !value && task.status === 'In Progress') {
+        task.status = 'Not Started';
+      }
       // NOTE: delay_status and days_delay are NOT recalculated here.
       // They are derived by recalculatePlan → calculateTask → calcDaysDelay,
       // which is called below only when a date-affecting field changes.
@@ -813,14 +822,13 @@ const ProjectPlan = ({ project, canEdit }) => {
       // onChange fires on every field change (day/month/year individually) in date inputs,
       // which would commit an intermediate value and close the editor before the user finishes.
       const onDateBlur = (e) => {
-        if (e.target.value) commit(e.target.value);
-        else setEditCell(null);
+        // Always commit — empty string is valid (clears actual_start / current_end → null)
+        commit(e.target.value);
       };
       const onDateEnter = (e) => {
         if (e.key === 'Enter') {
           e.preventDefault(); e.stopPropagation();
-          const v = e.target.value;
-          if (v) commit(v); else setEditCell(null);
+          commit(e.target.value); // commit even when empty (clears the field)
           const st = sortedTasksRef.current;
           const idx = st.findIndex(t => t.id === task.id);
           if (idx >= 0 && idx < st.length - 1) setSelectedCell({ taskId: st[idx + 1].id, col: col.key });
