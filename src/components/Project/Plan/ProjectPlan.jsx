@@ -599,17 +599,22 @@ const ProjectPlan = ({ project, canEdit }) => {
   useEffect(() => { sortedTasksRef.current = sortedTasks; }, [sortedTasks]);
 
   // ── Milestone color map ───────────────────────────────────────────────────────
-  // Primary map: stable per-milestone color based on the milestones array order
-  // so colors are consistent regardless of task order.
+  // Keys are whatever is stored in task.milestone (UUID from dropdown, or name
+  // string from the template).  Colors assigned in order of first appearance in
+  // sortedTasks so existing project colours are preserved unchanged.
+  // Milestones in the milestones table that have no tasks yet are also pre-assigned
+  // a colour (by their ID) so the custom picker can show them correctly.
   const milestoneColorMap = useMemo(() => {
-    const map = {};
-    milestones.forEach((m, idx) => {
-      map[m.id] = MILESTONE_PALETTE[idx % MILESTONE_PALETTE.length];
+    const map = {}; let idx = 0;
+    sortedTasks.forEach(t => {
+      const key = t.milestone || '__none__';
+      if (!map[key]) { map[key] = MILESTONE_PALETTE[idx % MILESTONE_PALETTE.length]; idx++; }
     });
-    // Fallback for tasks with no milestone (renders row top-border + badge)
-    map['__none__'] = MILESTONE_PALETTE[0];
+    milestones.forEach(m => {
+      if (m.id && !map[m.id]) { map[m.id] = MILESTONE_PALETTE[idx % MILESTONE_PALETTE.length]; idx++; }
+    });
     return map;
-  }, [milestones]);
+  }, [sortedTasks, milestones]);
 
   // Helper: get palette entry for a milestone ID (never returns undefined)
   const getMilestoneColor = (milestoneId) =>
