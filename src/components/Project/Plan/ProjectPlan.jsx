@@ -102,6 +102,26 @@ const ProjectPlan = ({ project, canEdit }) => {
   const [linkText, setLinkText]       = useState('');
   const [linkUrl, setLinkUrl]         = useState('');
 
+  // Column order — persisted to localStorage so reordering survives refresh
+  const [colOrder, setColOrder] = useState(() => {
+    const allKeys = COLUMNS.map(c => c.key);
+    try {
+      const saved = localStorage.getItem('planColOrder');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Keep saved order but add any new columns at the end
+        const filtered = parsed.filter(k => allKeys.includes(k));
+        const missing  = allKeys.filter(k => !filtered.includes(k));
+        return [...filtered, ...missing];
+      }
+    } catch {}
+    return allKeys;
+  });
+
+  // Column drag state
+  const [dragColKey,     setDragColKey]     = useState(null);
+  const [dragOverColKey, setDragOverColKey] = useState(null);
+
   // Column resize state — per-key widths, persisted to localStorage
   const [colWidths, setColWidths] = useState(() => {
     const defaults = Object.fromEntries(COLUMNS.map(c => [c.key, c.width]));
@@ -116,7 +136,10 @@ const ProjectPlan = ({ project, canEdit }) => {
   // is always the <tr>, not the child that was mousedown'd).
   const dragFromHandleRef = useRef(false);
 
-  // Persist column widths to localStorage whenever they change
+  // Persist column order + widths to localStorage whenever they change
+  useEffect(() => {
+    try { localStorage.setItem('planColOrder',  JSON.stringify(colOrder));  } catch {}
+  }, [colOrder]);
   useEffect(() => {
     try { localStorage.setItem('planColWidths', JSON.stringify(colWidths)); } catch {}
   }, [colWidths]);
@@ -452,6 +475,26 @@ const ProjectPlan = ({ project, canEdit }) => {
     } catch (e) { toast.error('Delete failed: ' + (e.message || '')); }
   };
 
+  // ── Column drag-to-reorder ────────────────────────────────────────────────────
+  function handleColReorder(fromKey, toKey) {
+    if (!fromKey || fromKey === toKey) { setDragColKey(null); setDragOverColKey(null); return; }
+    const fromCol = COLUMNS.find(c => c.key === fromKey);
+    const toCol   = COLUMNS.find(c => c.key === toKey);
+    // Only allow reorder within the same group (frozen ↔ frozen, scrollable ↔ scrollable)
+    if (!fromCol || !toCol || fromCol.frozen !== toCol.frozen) { setDragColKey(null); setDragOverColKey(null); return; }
+    setColOrder(prev => {
+      const next     = [...prev];
+      const fromIdx  = next.indexOf(fromKey);
+      const toIdx    = next.indexOf(toKey);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, fromKey);
+      return next;
+    });
+    setDragColKey(null);
+    setDragOverColKey(null);
+  }
+
   // ── Drag-to-reorder ───────────────────────────────────────────────────────────
   function handleRowReorder(fromId, toId) {
     if (!fromId || fromId === toId) { setDragId(null); setDragOverId(null); return; }
@@ -624,8 +667,12 @@ const ProjectPlan = ({ project, canEdit }) => {
     (milestoneId && milestoneColorMap[milestoneId]) ? milestoneColorMap[milestoneId] : MILESTONE_PALETTE[0];
 
   // ── Frozen column left offsets (cumulative) ───────────────────────────────────
-  const frozenCols = COLUMNS.filter(c => c.frozen  && visibleCols[c.key] !== false);
-  const scrollCols = COLUMNS.filter(c => !c.frozen && visibleCols[c.key] !== false);
+  const frozenCols = COLUMNS
+    .filter(c => c.frozen  && visibleCols[c.key] !== false)
+    .sort((a, b) => colOrder.indexOf(a.key) - colOrder.indexOf(b.key));
+  const scrollCols = COLUMNS
+    .filter(c => !c.frozen && visibleCols[c.key] !== false)
+    .sort((a, b) => colOrder.indexOf(a.key) - colOrder.indexOf(b.key));
 
   const frozenLeftOffsets = useMemo(() => {
     const offsets = {};
@@ -1058,20 +1105,24 @@ const ProjectPlan = ({ project, canEdit }) => {
                 {/* Frozen cols */}
                 {frozenCols.map(c => {
                   const w = colWidths[c.key] ?? c.width;
+                  const isColDragOver = dragOverColKey === c.key && dragColKey !== c.key;
                   return (
                     <th key={c.key}
                       style={{ minWidth: w, width: w, left: frozenLeftOffsets[c.key], backgroundColor: '#f8fafc', padding: 0 }}
-                      className="sticky z-30 border-r border-b border-slate-200 whitespace-nowrap">
-                      {/* Flex layout: label area + resize strip as siblings — no absolute positioning needed */}
+                      className={`sticky z-30 border-r border-b border-slate-200 whitespace-nowrap ${isColDragOver ? 'border-l-2 border-l-blue-400' : ''}`}
+                      onDragOver={e => { e.preventDefault(); if (dragColKey) setDragOverColKey(c.key); }}
+                      onDrop={e => { e.preventDefault(); handleColReorder(dragColKey, c.key); }}
+                      onDragEnd={() => { setDragColKey(null); setDragOverColKey(null); }}>
                       <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 36 }}>
                         <div
-                          style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', cursor: 'pointer', userSelect: 'none', overflow: 'hidden' }}
+                          draggable={isDM}
+                          style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', cursor: isDM ? 'grab' : 'pointer', userSelect: 'none', overflow: 'hidden' }}
                           className="font-semibold text-slate-600 text-xs text-left"
+                          onDragStart={e => { if (resizingRef.current) { e.preventDefault(); return; } e.stopPropagation(); setDragColKey(c.key); }}
                           onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
                           <span className="truncate">{c.label}</span>
                           <ArrowUpDown size={10} className="opacity-40 flex-shrink-0"/>
                         </div>
-                        {/* Resize strip — stretches full height via alignSelf: stretch (inherits from parent align-items: stretch) */}
                         <div
                           style={{ width: 6, flexShrink: 0, cursor: 'col-resize' }}
                           className="hover:bg-blue-400 opacity-0 hover:opacity-60 transition-opacity"
@@ -1085,14 +1136,20 @@ const ProjectPlan = ({ project, canEdit }) => {
                 {/* Scrollable cols */}
                 {scrollCols.map(c => {
                   const w = colWidths[c.key] ?? c.width;
+                  const isColDragOver = dragOverColKey === c.key && dragColKey !== c.key;
                   return (
                     <th key={c.key}
                       style={{ minWidth: w, width: w, backgroundColor: '#f8fafc', padding: 0 }}
-                      className="border-r border-b border-slate-200 whitespace-nowrap">
+                      className={`border-r border-b border-slate-200 whitespace-nowrap ${isColDragOver ? 'border-l-2 border-l-blue-400' : ''}`}
+                      onDragOver={e => { e.preventDefault(); if (dragColKey) setDragOverColKey(c.key); }}
+                      onDrop={e => { e.preventDefault(); handleColReorder(dragColKey, c.key); }}
+                      onDragEnd={() => { setDragColKey(null); setDragOverColKey(null); }}>
                       <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 36 }}>
                         <div
-                          style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', cursor: 'pointer', userSelect: 'none', overflow: 'hidden' }}
+                          draggable={isDM}
+                          style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', cursor: isDM ? 'grab' : 'pointer', userSelect: 'none', overflow: 'hidden' }}
                           className="font-semibold text-slate-600 text-xs text-left"
+                          onDragStart={e => { if (resizingRef.current) { e.preventDefault(); return; } e.stopPropagation(); setDragColKey(c.key); }}
                           onClick={() => setSortConfig({ col: c.key, dir: sortConfig.col === c.key && sortConfig.dir === 'asc' ? 'desc' : 'asc' })}>
                           <span className="truncate">{c.label}</span>
                           <ArrowUpDown size={10} className="opacity-40 flex-shrink-0"/>
