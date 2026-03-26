@@ -1,10 +1,8 @@
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, Users, FileText } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, MoreVertical, Trash2, Users, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getPeople, upsertPerson, deletePerson } from '../../../lib/supabase';
 import { useAuth } from '../../../contexts/AuthContext';
-
-const EMPTY_PERSON = { name: '', email: '', role: '', phone: '', team: 'Client' };
 
 // ── People templates by category ──────────────────────────────────────────────
 const CLEEN_TEMPLATE = {
@@ -24,6 +22,11 @@ const MES_TEMPLATE = {
   leucine: ['Promise Owner', 'Delivery Manager', 'Solution Architect', 'Integration Team'],
 };
 
+// Placeholder names shown initially (from xlsx template format)
+function templatePlaceholder(team, role) {
+  return `{${team} ${role}}`;
+}
+
 function getTemplateForCategory(categoryName) {
   if (!categoryName) return null;
   const n = categoryName.toLowerCase();
@@ -31,6 +34,8 @@ function getTemplateForCategory(categoryName) {
   if (n.includes('mes') || n.includes('logbook') || n.includes('ai agent') || n.includes('lms') || n.includes('dms')) return MES_TEMPLATE;
   return MES_TEMPLATE; // default to MES for unknown
 }
+
+const EMPTY_PERSON = { name: '', email: '', role: '', phone: '', team: 'Client' };
 
 export default function PeopleTab({ project, canEdit }) {
   const { isAdmin, isDM } = useAuth();
@@ -88,7 +93,6 @@ export default function PeopleTab({ project, canEdit }) {
   }
 
   async function removePerson(person) {
-    if (!window.confirm(`Remove ${person.name || person.role || 'this person'}?`)) return;
     try {
       await deletePerson(person.id);
       if (person.team === 'Client') setClientPeople(prev => prev.filter(p => p.id !== person.id));
@@ -101,15 +105,45 @@ export default function PeopleTab({ project, canEdit }) {
 
   async function loadTemplate() {
     if (!template) return;
-    if (!window.confirm('This will add template roles to both teams. Existing people will not be removed. Continue?')) return;
+
+    // Check which roles already exist (by role+team) to prevent duplicates
+    const existingClientRoles = new Set(clientPeople.map(p => p.role));
+    const existingLeuRoles    = new Set(leucinePeople.map(p => p.role));
+
+    const newClientRoles  = template.client.filter(role => !existingClientRoles.has(role));
+    const newLeuRoles     = template.leucine.filter(role => !existingLeuRoles.has(role));
+
+    if (newClientRoles.length === 0 && newLeuRoles.length === 0) {
+      toast('Template roles already loaded — no new roles to add.');
+      return;
+    }
+
+    if (!window.confirm(
+      `This will add ${newClientRoles.length} client + ${newLeuRoles.length} Leucine template roles. Continue?`
+    )) return;
+
     setLoadingTemplate(true);
     try {
-      const clientRows = template.client.map(role => ({ name: '', role, email: '', phone: '', team: 'Client', project_id: project.id }));
-      const leucineRows = template.leucine.map(role => ({ name: '', role, email: '', phone: '', team: 'Leucine', project_id: project.id }));
-      const allRows = [...clientRows, ...leucineRows];
-      const saved = await Promise.all(allRows.map(r => upsertPerson(r)));
-      const savedClient = saved.filter(p => p.team === 'Client');
-      const savedLeuine = saved.filter(p => p.team === 'Leucine');
+      const clientRows = newClientRoles.map(role => ({
+        name:       templatePlaceholder('Client', role),
+        role,
+        email:      '',
+        phone:      '',
+        team:       'Client',
+        project_id: project.id,
+      }));
+      const leucineRows = newLeuRoles.map(role => ({
+        name:       templatePlaceholder('Leucine', role),
+        role,
+        email:      '',
+        phone:      '',
+        team:       'Leucine',
+        project_id: project.id,
+      }));
+
+      const saved = await Promise.all([...clientRows, ...leucineRows].map(r => upsertPerson(r)));
+      const savedClient  = saved.filter(p => p.team === 'Client');
+      const savedLeuine  = saved.filter(p => p.team === 'Leucine');
       setClientPeople(prev => [...prev, ...savedClient]);
       setLeucinePeople(prev => [...prev, ...savedLeuine]);
       toast.success(`Template loaded — ${savedClient.length} client + ${savedLeuine.length} Leucine roles added`);
@@ -123,7 +157,7 @@ export default function PeopleTab({ project, canEdit }) {
 
   return (
     <div className="p-6 space-y-8">
-      {/* Template banner — shown when people list is empty and a template exists */}
+      {/* Template banner — shown when people list is empty */}
       {canManage && template && (clientPeople.length === 0 && leucinePeople.length === 0) && (
         <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
           <div className="flex items-center gap-2">
@@ -145,7 +179,7 @@ export default function PeopleTab({ project, canEdit }) {
         </div>
       )}
 
-      {/* Load template button in header when people already exist */}
+      {/* Load template button — shown when people already exist */}
       {canManage && template && (clientPeople.length > 0 || leucinePeople.length > 0) && (
         <div className="flex justify-end">
           <button
@@ -192,6 +226,16 @@ export default function PeopleTab({ project, canEdit }) {
 }
 
 function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNewPerson, onAdd, onSave, onCancel, onFieldChange, onDelete }) {
+  const [openMenuId, setOpenMenuId] = useState(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!openMenuId) return;
+    const h = () => setOpenMenuId(null);
+    document.addEventListener('click', h);
+    return () => document.removeEventListener('click', h);
+  }, [openMenuId]);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
@@ -211,41 +255,66 @@ function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNew
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
+              {canManage && <th className="w-8" />}
               <th className="text-left px-4 py-2.5 font-medium text-gray-600 w-52">Name</th>
               <th className="text-left px-4 py-2.5 font-medium text-gray-600 w-64">Email</th>
               <th className="text-left px-4 py-2.5 font-medium text-gray-600 w-48">Role / Title</th>
               <th className="text-left px-4 py-2.5 font-medium text-gray-600 w-36">Phone</th>
-              {canManage && <th className="w-10" />}
             </tr>
           </thead>
           <tbody>
             {people.map((person, i) => (
               <tr key={person.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                <td className="px-4 py-2">
-                  <EditableCell value={person.name} onSave={v => onFieldChange(person, 'name', v)} canEdit={canManage} placeholder="Fill in name…" />
-                </td>
-                <td className="px-4 py-2">
-                  <EditableCell value={person.email} onSave={v => onFieldChange(person, 'email', v)} canEdit={canManage} type="email" />
-                </td>
-                <td className="px-4 py-2">
-                  <EditableCell value={person.role} onSave={v => onFieldChange(person, 'role', v)} canEdit={canManage} />
-                </td>
-                <td className="px-4 py-2">
-                  <EditableCell value={person.phone} onSave={v => onFieldChange(person, 'phone', v)} canEdit={canManage} type="tel" />
-                </td>
+                {/* Three-dots at start */}
                 {canManage && (
-                  <td className="px-2 py-2">
-                    <button onClick={() => onDelete(person)} className="text-gray-400 hover:text-red-500 transition">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  <td className="px-1 py-2 w-8">
+                    <div className="relative flex items-center justify-center">
+                      <button
+                        onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === person.id ? null : person.id); }}
+                        className="p-0.5 hover:bg-gray-200 rounded transition"
+                      >
+                        <MoreVertical className="w-3.5 h-3.5 text-gray-400" />
+                      </button>
+                      {openMenuId === person.id && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setOpenMenuId(null)} />
+                          <div className="absolute left-6 top-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 w-24">
+                            <button
+                              onClick={() => { setOpenMenuId(null); onDelete(person); }}
+                              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2 size={11} /> Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </td>
                 )}
+                <td className="px-4 py-2">
+                  <EditableCell
+                    value={person.name}
+                    onSave={v => onFieldChange(person, 'name', v)}
+                    canEdit={canManage}
+                    placeholder={person.role ? `{${team} ${person.role}}` : 'Fill in name…'}
+                  />
+                </td>
+                <td className="px-4 py-2">
+                  <EditableCell value={person.email} onSave={v => onFieldChange(person, 'email', v)} canEdit={canManage} type="email" placeholder="email@example.com" />
+                </td>
+                <td className="px-4 py-2">
+                  <EditableCell value={person.role} onSave={v => onFieldChange(person, 'role', v)} canEdit={canManage} placeholder="Role / Title" />
+                </td>
+                <td className="px-4 py-2">
+                  <EditableCell value={person.phone} onSave={v => onFieldChange(person, 'phone', v)} canEdit={canManage} type="tel" placeholder="+1 555 000 0000" />
+                </td>
               </tr>
             ))}
 
             {/* Add new person row */}
             {adding && (
               <tr className="bg-blue-50/30 border-t border-blue-100">
+                {canManage && <td className="w-8" />}
                 <td className="px-4 py-2">
                   <input
                     autoFocus
@@ -257,31 +326,19 @@ function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNew
                   />
                 </td>
                 <td className="px-4 py-2">
-                  <input
-                    type="email"
-                    placeholder="Email"
-                    value={newPerson.email}
+                  <input type="email" placeholder="Email" value={newPerson.email}
                     onChange={e => setNewPerson(p => ({ ...p, email: e.target.value }))}
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  />
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
                 </td>
                 <td className="px-4 py-2">
-                  <input
-                    type="text"
-                    placeholder="Role"
-                    value={newPerson.role}
+                  <input type="text" placeholder="Role" value={newPerson.role}
                     onChange={e => setNewPerson(p => ({ ...p, role: e.target.value }))}
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  />
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
                 </td>
                 <td className="px-4 py-2">
-                  <input
-                    type="tel"
-                    placeholder="Phone"
-                    value={newPerson.phone}
+                  <input type="tel" placeholder="Phone" value={newPerson.phone}
                     onChange={e => setNewPerson(p => ({ ...p, phone: e.target.value }))}
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  />
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
                 </td>
                 <td className="px-2 py-2">
                   <div className="flex gap-1">
@@ -294,9 +351,9 @@ function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNew
 
             {people.length === 0 && !adding && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400">
+                <td colSpan={canManage ? 5 : 4} className="px-4 py-8 text-center text-sm text-gray-400">
                   No {title.toLowerCase()} added yet.
-                  {canManage && ' Click "Add Person" to get started.'}
+                  {canManage && ' Click "Add Person" or "Load Template" to get started.'}
                 </td>
               </tr>
             )}
@@ -337,11 +394,11 @@ function EditableCell({ value, onSave, canEdit, type = 'text', placeholder = '�
   return (
     <span
       onClick={() => setEditing(true)}
-      className="block w-full cursor-text text-gray-700 min-h-[1.5rem] hover:bg-blue-50 rounded px-1 py-0.5 transition"
+      className="block w-full cursor-text min-h-[1.5rem] hover:bg-blue-50 rounded px-1 py-0.5 transition"
     >
       {value
-        ? value
-        : <span className="text-gray-300 italic text-xs">{placeholder}</span>
+        ? <span className="text-gray-700">{value}</span>
+        : <span className="text-gray-400 italic text-xs">{placeholder}</span>
       }
     </span>
   );

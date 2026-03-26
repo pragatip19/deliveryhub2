@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, MoreVertical, Trash2, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getRaidItems, upsertRaidItem, deleteRaidItem } from '../../../lib/supabase';
@@ -160,10 +160,9 @@ export default function RaidTable({ project, canEdit, type }) {
             </thead>
             <tbody>
               {items.map((item, i) => (
-                <>
+                <React.Fragment key={item.id}>
                   {/* Summary row — click to expand */}
                   <tr
-                    key={item.id}
                     className={`border-b border-gray-100 cursor-pointer hover:bg-blue-50 transition ${expandedId === item.id ? 'bg-blue-50' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}
                     onClick={() => toggleExpand(item)}
                   >
@@ -208,7 +207,7 @@ export default function RaidTable({ project, canEdit, type }) {
 
                   {/* Expanded detail panel */}
                   {expandedId === item.id && editingItem && (
-                    <tr key={`${item.id}_expand`} className="bg-blue-50/40 border-b border-blue-200">
+                    <tr className="bg-blue-50/40 border-b border-blue-200">
                       <td colSpan={9} className="px-6 py-4">
                         <div className="grid grid-cols-2 gap-4">
                           {/* Title */}
@@ -288,7 +287,7 @@ export default function RaidTable({ project, canEdit, type }) {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))}
             </tbody>
           </table>

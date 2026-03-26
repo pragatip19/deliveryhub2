@@ -135,7 +135,7 @@ const PaymentsTab = ({ project, canEdit }) => {
 
   const handleAddRow = useCallback(() => {
     const newItem = {
-      id: `payment_${Date.now()}`,
+      id: crypto.randomUUID(),
       project_id: project.id,
       line_item: '',
       milestone: '',
