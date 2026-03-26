@@ -16,6 +16,23 @@ import {
   SOW_DROPDOWN_OPTIONS,
 } from '../../../lib/templates';
 
+// Color map for common SOW specification values
+const SOW_SPEC_COLORS = {
+  'Signed':                        'bg-emerald-100 text-emerald-700',
+  'Not Signed':                    'bg-red-100 text-red-700',
+  'Not Required':                  'bg-gray-100 text-gray-600',
+  'Pending':                       'bg-amber-100 text-amber-700',
+  'Required':                      'bg-blue-100 text-blue-700',
+  'Included':                      'bg-emerald-100 text-emerald-700',
+  'Not Included':                  'bg-gray-100 text-gray-600',
+  'Go Live scope':                 'bg-blue-100 text-blue-700',
+  'Post Go Live scope':            'bg-violet-100 text-violet-700',
+  'Not in scope':                  'bg-gray-100 text-gray-500',
+  'Leucine Managed':               'bg-indigo-100 text-indigo-700',
+  'Customer Managed':              'bg-orange-100 text-orange-700',
+  'Not applicable, already live':  'bg-teal-100 text-teal-700',
+};
+
 const SOWTab = ({ project, canEdit }) => {
   const [sections, setSections] = useState([]);
   // dropdownOptions is keyed by work_item name (e.g. 'MSA' -> ['Signed', ...])
@@ -382,7 +399,7 @@ const SOWTab = ({ project, canEdit }) => {
                                           handleItemChange(section.name, item.id, 'specification', value);
                                         }
                                       }}
-                                      className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500"
+                                      className={`flex-1 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 font-medium ${SOW_SPEC_COLORS[item.specification] || 'bg-white text-gray-700'}`}
                                       disabled={!canEdit}
                                     >
                                       <option value="">Select...</option>

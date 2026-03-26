@@ -1,23 +1,46 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Trash2, Plus, Download } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { MoreVertical, Plus, Download, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getPayments, upsertPayment, deletePayment, getPlanTasks } from '../../../lib/supabase';
 import { PAYMENTS_TEMPLATE, PAYMENT_STATUS_OPTIONS, PAYMENT_TYPE_OPTIONS, CURRENCY_OPTIONS } from '../../../lib/templates';
 import { formatDate } from '../../../lib/workdays';
 import { useAuth } from '../../../contexts/AuthContext';
 
-const MILESTONE_STATUS_COLORS = {
-  'Not Started': 'bg-gray-100 text-gray-800',
-  'In Progress': 'bg-yellow-100 text-yellow-800',
-  'Done': 'bg-green-100 text-green-800',
-  'Blocked': 'bg-red-100 text-red-800',
+// ── Dropdown color maps ──────────────────────────────────────────────────────
+const PAYMENT_STATUS_COLORS = {
+  'Not Paid':        'bg-gray-100 text-gray-700',
+  'Invoice Sent':    'bg-blue-100 text-blue-700',
+  'Project Pending': 'bg-amber-100 text-amber-700',
+  'Paid':            'bg-emerald-100 text-emerald-700',
 };
 
-const PAYMENT_STATUS_COLORS = {
-  'Not Paid': 'bg-gray-100 text-gray-800',
-  'Invoice Sent': 'bg-blue-100 text-blue-800',
-  'Project Pending': 'bg-yellow-100 text-yellow-800',
-  'Paid': 'bg-green-100 text-green-800',
+const MILESTONE_STATUS_COLORS = {
+  'Not Started': 'bg-gray-100 text-gray-700',
+  'In Progress': 'bg-yellow-100 text-yellow-800',
+  'Done':        'bg-green-100 text-green-800',
+  'Blocked':     'bg-red-100 text-red-800',
+};
+
+// Pill badge for read-only mode
+const StatusPill = ({ value, colorMap }) => {
+  const cls = colorMap[value] || 'bg-gray-100 text-gray-700';
+  return <span className={`px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{value || '—'}</span>;
+};
+
+// Colored select — background matches selected value
+const ColoredSelect = ({ value, options, colorMap, onChange, disabled }) => {
+  const cls = colorMap[value] || 'bg-white text-gray-700';
+  return (
+    <select
+      value={value || ''}
+      onChange={e => onChange(e.target.value)}
+      disabled={disabled}
+      className={`w-full px-1.5 py-0.5 rounded text-xs font-medium border border-gray-200 focus:outline-none focus:border-blue-400 ${cls}`}
+    >
+      <option value="">—</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
 };
 
 const PaymentsTab = ({ project, canEdit }) => {
@@ -25,8 +48,29 @@ const PaymentsTab = ({ project, canEdit }) => {
   const [payments, setPayments] = useState([]);
   const [planTasks, setPlanTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
-  const [filters, setFilters] = useState({});
+  const [openMenuId, setOpenMenuId] = useState(null);
+
+  // Column widths (resizable)
+  const LS_KEY = `payCols_${project?.id}`;
+  const DEFAULT_COLS = { actions: 36, line_item: 160, milestone: 140, type: 130, amount: 90, currency: 70, milestone_status: 110, planned_date: 130, invoice_id: 100, payment_status: 120, pending_amount: 110 };
+  const [colWidths, setColWidths] = useState(() => {
+    try { const s = localStorage.getItem(LS_KEY); return s ? { ...DEFAULT_COLS, ...JSON.parse(s) } : { ...DEFAULT_COLS }; } catch { return { ...DEFAULT_COLS }; }
+  });
+  const resizingRef = useRef(null);
+
+  useEffect(() => { try { localStorage.setItem(LS_KEY, JSON.stringify(colWidths)); } catch {} }, [colWidths]);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!resizingRef.current) return;
+      const { key, startX, startW } = resizingRef.current;
+      setColWidths(p => ({ ...p, [key]: Math.max(50, startW + (e.clientX - startX)) }));
+    };
+    const onUp = () => { resizingRef.current = null; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
 
   const canDeleteRows = isAdmin() || (isDM() && project?.dm_id === user?.id);
 
@@ -41,31 +85,28 @@ const PaymentsTab = ({ project, canEdit }) => {
         setPayments(paymentsData || []);
         setPlanTasks(tasksData || []);
       } catch (error) {
-        console.error('Error loading payments data:', error);
         toast.error('Failed to load payments data');
-      } finally {
-        setLoading(false);
-      }
+      } finally { setLoading(false); }
     };
-
-    if (project?.id) {
-      loadData();
-    }
+    if (project?.id) loadData();
   }, [project?.id]);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!openMenuId) return;
+    const h = () => setOpenMenuId(null);
+    document.addEventListener('click', h);
+    return () => document.removeEventListener('click', h);
+  }, [openMenuId]);
 
   const debouncedSave = useCallback(
     (() => {
-      let timeoutId;
+      let t;
       return (item) => {
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(async () => {
-          try {
-            await upsertPayment(project.id, item);
-            toast.success('Payment item saved');
-          } catch (error) {
-            console.error('Error saving payment item:', error);
-            toast.error('Failed to save payment item');
-          }
+        clearTimeout(t);
+        t = setTimeout(async () => {
+          try { await upsertPayment(project.id, item); }
+          catch { toast.error('Failed to save payment item'); }
         }, 800);
       };
     })(),
@@ -74,18 +115,22 @@ const PaymentsTab = ({ project, canEdit }) => {
 
   const handleCellChange = useCallback(
     (itemId, field, value) => {
-      setPayments(prevItems =>
-        prevItems.map(item =>
-          item.id === itemId ? { ...item, [field]: value } : item
-        )
-      );
-
-      const item = payments.find(i => i.id === itemId);
-      if (item) {
-        debouncedSave({ ...item, [field]: value });
-      }
+      setPayments(prev => {
+        const updated = prev.map(item => {
+          if (item.id !== itemId) return item;
+          let next = { ...item, [field]: value };
+          // Auto-set pending_amount to 0 when Invoice Sent
+          if (field === 'payment_status' && value === 'Invoice Sent') {
+            next.pending_milestone_amount = 0;
+          }
+          return next;
+        });
+        const item = updated.find(i => i.id === itemId);
+        if (item) debouncedSave(item);
+        return updated;
+      });
     },
-    [payments, debouncedSave]
+    [debouncedSave]
   );
 
   const handleAddRow = useCallback(() => {
@@ -101,269 +146,58 @@ const PaymentsTab = ({ project, canEdit }) => {
       planned_milestone_completion_date: null,
       invoice_id: '',
       payment_status: 'Not Paid',
-      pending_milestone_amount: 0,
+      pending_milestone_amount: 0, // set equal to amount (which is 0 by default)
     };
-
     setPayments(prev => [...prev, newItem]);
     debouncedSave(newItem);
   }, [project.id, debouncedSave]);
 
-  const handleDeleteRow = useCallback(
-    async (itemId) => {
-      try {
-        await deletePayment(itemId);
-        setPayments(prev => prev.filter(item => item.id !== itemId));
-        toast.success('Payment item deleted');
-      } catch (error) {
-        console.error('Error deleting payment item:', error);
-        toast.error('Failed to delete payment item');
-      }
+  // When amount changes, mirror to pending_amount if not Invoice Sent
+  const handleAmountChange = useCallback(
+    (itemId, value) => {
+      setPayments(prev => {
+        const updated = prev.map(item => {
+          if (item.id !== itemId) return item;
+          const shouldMirror = item.payment_status !== 'Invoice Sent' && item.payment_status !== 'Paid';
+          return { ...item, amount: value, pending_milestone_amount: shouldMirror ? value : item.pending_milestone_amount };
+        });
+        const item = updated.find(i => i.id === itemId);
+        if (item) debouncedSave(item);
+        return updated;
+      });
     },
-    []
+    [debouncedSave]
   );
 
-  const handleExportToExcel = useCallback(() => {
+  const handleDeleteRow = useCallback(async (itemId) => {
     try {
-      // Prepare CSV data
-      const headers = [
-        'Line Item',
-        'Milestone',
-        'Type',
-        'Amount',
-        'Currency',
-        'Milestone Status',
-        'Planned Milestone Completion Date',
-        'Invoice ID',
-        'Payment Status',
-        'Pending Milestone Amount',
-      ];
+      await deletePayment(itemId);
+      setPayments(prev => prev.filter(item => item.id !== itemId));
+      toast.success('Payment item deleted');
+    } catch { toast.error('Failed to delete payment item'); }
+  }, []);
 
-      const rows = payments.map(item => [
-        item.line_item || '',
-        item.milestone || '',
-        item.type || '',
-        item.amount || '',
-        item.currency || '',
-        item.milestone_status || '',
-        item.planned_milestone_completion_date || '',
-        item.invoice_id || '',
-        item.payment_status || '',
-        item.pending_milestone_amount || '',
-      ]);
-
-      // Create CSV content
-      const csvContent = [
-        headers.join(','),
-        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')),
-      ].join('\n');
-
-      // Download CSV
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-
-      link.setAttribute('href', url);
-      link.setAttribute('download', `payments_${project.id}_${Date.now()}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      toast.success('Exported to Excel');
-    } catch (error) {
-      console.error('Error exporting data:', error);
-      toast.error('Failed to export data');
-    }
+  const handleExport = useCallback(() => {
+    const headers = ['Line Item','Milestone','Type','Amount','Currency','Milestone Status','Planned Completion','Invoice ID','Payment Status','Pending Amount'];
+    const rows = payments.map(i => [i.line_item,i.milestone,i.type,i.amount,i.currency,i.milestone_status,i.planned_milestone_completion_date,i.invoice_id,i.payment_status,i.pending_milestone_amount]);
+    const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(','))].join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `payments_${project.id}.csv`;
+    a.click();
+    toast.success('Exported');
   }, [payments, project.id]);
 
-  const sortedItems = useMemo(() => {
-    let sorted = [...payments];
+  const ResizeHandle = ({ colKey }) => (
+    <div
+      className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 z-10"
+      onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: colKey, startX: e.clientX, startW: colWidths[colKey] }; }}
+    />
+  );
 
-    // Apply filters
-    Object.entries(filters).forEach(([key, value]) => {
-      if (value && value !== '') {
-        sorted = sorted.filter(item => {
-          const itemValue = String(item[key]).toLowerCase();
-          return itemValue.includes(String(value).toLowerCase());
-        });
-      }
-    });
+  const cw = (k) => ({ width: colWidths[k], minWidth: colWidths[k] });
 
-    // Apply sorting
-    if (sortConfig.key) {
-      sorted.sort((a, b) => {
-        const aVal = a[sortConfig.key];
-        const bVal = b[sortConfig.key];
-
-        if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
-
-    return sorted;
-  }, [payments, sortConfig, filters]);
-
-  const handleSort = (key) => {
-    setSortConfig(prevConfig => {
-      if (prevConfig.key === key) {
-        return {
-          key,
-          direction: prevConfig.direction === 'asc' ? 'desc' : 'asc',
-        };
-      }
-      return { key, direction: 'asc' };
-    });
-  };
-
-  const renderStatusPill = (status, colorMap) => {
-    const colors = colorMap[status] || 'bg-gray-100 text-gray-800';
-    return (
-      <span className={`px-2 py-1 rounded text-sm font-medium ${colors}`}>
-        {status}
-      </span>
-    );
-  };
-
-  const getAutoPlannedDate = (milestoneName) => {
-    if (!milestoneName) return null;
-    const matchingTask = planTasks.find(
-      task => task.activity_name?.toLowerCase() === milestoneName.toLowerCase()
-    );
-    return matchingTask?.planned_end || null;
-  };
-
-  const renderCell = (item, field, itemId) => {
-    const value = item[field];
-    const isDateField = field === 'planned_milestone_completion_date';
-    const isTypeField = field === 'type';
-    const isCurrencyField = field === 'currency';
-    const isMilestoneStatusField = field === 'milestone_status';
-    const isPaymentStatusField = field === 'payment_status';
-    const isNumberField = ['amount', 'pending_milestone_amount'].includes(field);
-
-    if (!canEdit) {
-      if (isMilestoneStatusField) {
-        return renderStatusPill(value, MILESTONE_STATUS_COLORS);
-      }
-      if (isPaymentStatusField) {
-        return renderStatusPill(value, PAYMENT_STATUS_COLORS);
-      }
-      if (isDateField) {
-        // Try to get auto-populated date if not manually set
-        const displayDate = value || getAutoPlannedDate(item.milestone);
-        return displayDate ? new Date(displayDate).toLocaleDateString() : '-';
-      }
-      return value || '-';
-    }
-
-    if (isTypeField) {
-      return (
-        <select
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        >
-          <option value="">Select type</option>
-          {PAYMENT_TYPE_OPTIONS.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      );
-    }
-
-    if (isCurrencyField) {
-      return (
-        <select
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        >
-          <option value="">Select currency</option>
-          {CURRENCY_OPTIONS.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      );
-    }
-
-    if (isMilestoneStatusField) {
-      return (
-        <select
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        >
-          <option value="">Select status</option>
-          {['Not Started', 'In Progress', 'Done', 'Blocked'].map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      );
-    }
-
-    if (isPaymentStatusField) {
-      return (
-        <select
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        >
-          <option value="">Select status</option>
-          {PAYMENT_STATUS_OPTIONS.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      );
-    }
-
-    if (isDateField) {
-      const autoDate = getAutoPlannedDate(item.milestone);
-      return (
-        <div className="relative">
-          <input
-            type="date"
-            value={value || ''}
-            onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-            className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-          />
-          {autoDate && !value && (
-            <span className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs bg-blue-100 text-blue-700 px-1 py-0.5 rounded">
-              Auto
-            </span>
-          )}
-        </div>
-      );
-    }
-
-    if (isNumberField) {
-      return (
-        <input
-          type="number"
-          value={value || 0}
-          onChange={(e) => handleCellChange(itemId, field, parseFloat(e.target.value) || 0)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        />
-      );
-    }
-
-    return (
-      <input
-        type="text"
-        value={value || ''}
-        onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-        className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-      />
-    );
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
+  if (loading) return <div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" /></div>;
 
   return (
     <div className="space-y-4 p-6">
@@ -371,71 +205,159 @@ const PaymentsTab = ({ project, canEdit }) => {
         <h3 className="text-lg font-semibold">Payments Tracker</h3>
         <div className="flex gap-2">
           {canEdit && (
-            <button
-              onClick={handleAddRow}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              <Plus size={18} /> Add Row
+            <button onClick={handleAddRow} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
+              <Plus size={16} /> Add Row
             </button>
           )}
-          <button
-            onClick={handleExportToExcel}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-          >
-            <Download size={18} /> Export
+          <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">
+            <Download size={16} /> Export
           </button>
         </div>
       </div>
 
-      <div className="overflow-x-auto border border-gray-300 rounded-lg">
-        <table className="w-full border-collapse text-sm">
+      <div className="overflow-x-auto border border-gray-300 rounded-lg select-none">
+        <table className="border-collapse text-xs" style={{ minWidth: '100%' }}>
           <thead>
             <tr className="bg-gray-100 border-b">
-              <th className="px-4 py-2 text-left font-semibold border-r w-44">Line Item</th>
-              <th className="px-4 py-2 text-left font-semibold border-r w-40">Milestone</th>
-              <th className="px-4 py-2 text-left font-semibold border-r w-36">Type</th>
-              <th className="px-4 py-2 text-right font-semibold border-r w-28">Amount</th>
-              <th className="px-4 py-2 text-left font-semibold border-r w-24">Currency</th>
-              <th className="px-4 py-2 text-left font-semibold border-r w-32">Milestone Status</th>
-              <th className="px-4 py-2 text-left font-semibold border-r w-48">Planned Completion</th>
-              <th className="px-4 py-2 text-left font-semibold border-r w-28">Invoice ID</th>
-              <th className="px-4 py-2 text-left font-semibold border-r w-32">Payment Status</th>
-              <th className="px-4 py-2 text-right font-semibold border-r w-40">Pending Amount</th>
-              <th className="px-4 py-2 text-center font-semibold w-12">Actions</th>
+              {/* Three-dots column */}
+              <th className="relative border-r" style={cw('actions')} />
+              {[
+                { key: 'line_item', label: 'Line Item' },
+                { key: 'milestone', label: 'Milestone' },
+                { key: 'type', label: 'Type' },
+                { key: 'amount', label: 'Amount', right: true },
+                { key: 'currency', label: 'Currency' },
+                { key: 'milestone_status', label: 'Milestone Status' },
+                { key: 'planned_date', label: 'Planned Completion' },
+                { key: 'invoice_id', label: 'Invoice ID' },
+                { key: 'payment_status', label: 'Payment Status' },
+                { key: 'pending_amount', label: 'Pending Amount', right: true },
+              ].map(({ key, label, right }) => (
+                <th key={key} className={`relative px-2 py-2 font-semibold border-r text-gray-700 ${right ? 'text-right' : 'text-left'}`} style={cw(key)}>
+                  {label}
+                  <ResizeHandle colKey={key} />
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {sortedItems.map((item, idx) => (
-              <tr
-                key={item.id}
-                className={idx % 2 === 0 ? 'bg-white border-b' : 'bg-gray-50 border-b'}
-              >
-                <td className="px-4 py-2 border-r">{renderCell(item, 'line_item', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'milestone', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'type', item.id)}</td>
-                <td className="px-4 py-2 border-r text-right">{renderCell(item, 'amount', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'currency', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'milestone_status', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'planned_milestone_completion_date', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'invoice_id', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'payment_status', item.id)}</td>
-                <td className="px-4 py-2 border-r text-right">{renderCell(item, 'pending_milestone_amount', item.id)}</td>
-                <td className="px-4 py-2 text-center">
-                  {canDeleteRows && (
+            {payments.map((item, idx) => (
+              <tr key={item.id} className={idx % 2 === 0 ? 'bg-white border-b' : 'bg-gray-50 border-b'}>
+                {/* Three-dots actions menu */}
+                <td className="border-r text-center" style={cw('actions')}>
+                  <div className="relative flex items-center justify-center h-full">
                     <button
-                      onClick={() => handleDeleteRow(item.id)}
-                      className="text-red-500 hover:text-red-700"
-                      title="Delete row"
+                      onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === item.id ? null : item.id); }}
+                      className="p-1 hover:bg-gray-200 rounded transition"
                     >
-                      <Trash2 size={16} />
+                      <MoreVertical size={13} className="text-gray-400" />
                     </button>
-                  )}
+                    {openMenuId === item.id && canDeleteRows && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setOpenMenuId(null)} />
+                        <div className="absolute left-7 top-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 w-24">
+                          <button
+                            onClick={() => { setOpenMenuId(null); handleDeleteRow(item.id); }}
+                            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 size={11} /> Delete
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </td>
+
+                {/* Line Item */}
+                <td className="px-2 py-1 border-r" style={cw('line_item')}>
+                  {canEdit ? (
+                    <input type="text" value={item.line_item || ''} onChange={e => handleCellChange(item.id, 'line_item', e.target.value)}
+                      className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400" />
+                  ) : item.line_item || '—'}
+                </td>
+
+                {/* Milestone */}
+                <td className="px-2 py-1 border-r" style={cw('milestone')}>
+                  {canEdit ? (
+                    <input type="text" value={item.milestone || ''} onChange={e => handleCellChange(item.id, 'milestone', e.target.value)}
+                      className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400" />
+                  ) : item.milestone || '—'}
+                </td>
+
+                {/* Type */}
+                <td className="px-2 py-1 border-r" style={cw('type')}>
+                  {canEdit ? (
+                    <select value={item.type || ''} onChange={e => handleCellChange(item.id, 'type', e.target.value)}
+                      className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 bg-white">
+                      <option value="">—</option>
+                      {PAYMENT_TYPE_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  ) : item.type || '—'}
+                </td>
+
+                {/* Amount */}
+                <td className="px-2 py-1 border-r text-right" style={cw('amount')}>
+                  {canEdit ? (
+                    <input type="number" value={item.amount || 0} onChange={e => handleAmountChange(item.id, parseFloat(e.target.value) || 0)}
+                      className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs text-right focus:outline-none focus:border-blue-400" />
+                  ) : item.amount ?? '—'}
+                </td>
+
+                {/* Currency */}
+                <td className="px-2 py-1 border-r" style={cw('currency')}>
+                  {canEdit ? (
+                    <select value={item.currency || ''} onChange={e => handleCellChange(item.id, 'currency', e.target.value)}
+                      className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 bg-white">
+                      <option value="">—</option>
+                      {CURRENCY_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  ) : item.currency || '—'}
+                </td>
+
+                {/* Milestone Status */}
+                <td className="px-2 py-1 border-r" style={cw('milestone_status')}>
+                  {canEdit ? (
+                    <ColoredSelect value={item.milestone_status} options={['Not Started','In Progress','Done','Blocked']}
+                      colorMap={MILESTONE_STATUS_COLORS} onChange={v => handleCellChange(item.id, 'milestone_status', v)} />
+                  ) : <StatusPill value={item.milestone_status} colorMap={MILESTONE_STATUS_COLORS} />}
+                </td>
+
+                {/* Planned Completion */}
+                <td className="px-2 py-1 border-r" style={cw('planned_date')}>
+                  {canEdit ? (
+                    <input type="date" value={item.planned_milestone_completion_date || ''} onChange={e => handleCellChange(item.id, 'planned_milestone_completion_date', e.target.value)}
+                      className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400" />
+                  ) : item.planned_milestone_completion_date ? new Date(item.planned_milestone_completion_date).toLocaleDateString() : '—'}
+                </td>
+
+                {/* Invoice ID */}
+                <td className="px-2 py-1 border-r" style={cw('invoice_id')}>
+                  {canEdit ? (
+                    <input type="text" value={item.invoice_id || ''} onChange={e => handleCellChange(item.id, 'invoice_id', e.target.value)}
+                      className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400" />
+                  ) : item.invoice_id || '—'}
+                </td>
+
+                {/* Payment Status */}
+                <td className="px-2 py-1 border-r" style={cw('payment_status')}>
+                  {canEdit ? (
+                    <ColoredSelect value={item.payment_status} options={PAYMENT_STATUS_OPTIONS}
+                      colorMap={PAYMENT_STATUS_COLORS} onChange={v => handleCellChange(item.id, 'payment_status', v)} />
+                  ) : <StatusPill value={item.payment_status} colorMap={PAYMENT_STATUS_COLORS} />}
+                </td>
+
+                {/* Pending Amount */}
+                <td className="px-2 py-1 border-r text-right" style={cw('pending_amount')}>
+                  {canEdit ? (
+                    <input type="number" value={item.pending_milestone_amount ?? 0} onChange={e => handleCellChange(item.id, 'pending_milestone_amount', parseFloat(e.target.value) || 0)}
+                      className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs text-right focus:outline-none focus:border-blue-400" />
+                  ) : item.pending_milestone_amount ?? '—'}
                 </td>
               </tr>
             ))}
-            {sortedItems.length === 0 && (
+            {payments.length === 0 && (
               <tr>
-                <td colSpan="11" className="px-4 py-8 text-center text-gray-500">
+                <td colSpan={11} className="px-4 py-8 text-center text-sm text-gray-500">
                   No payment items yet. {canEdit && 'Click "Add Row" to create one.'}
                 </td>
               </tr>
