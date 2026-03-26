@@ -14,18 +14,20 @@ import UATTab from './UAT/UATTab';
 import RaidTable from './RAID/RaidTable';
 import FeedbackTab from './Feedback/FeedbackTab';
 import DocumentsTab from './Documents/DocumentsTab';
+import DeliveryPlanTab from './DeliveryPlan/DeliveryPlanTab';
 
 const TABS = [
-  { id: 'health', label: 'Health', path: 'health' },
-  { id: 'sow', label: 'SOW', path: 'sow' },
-  { id: 'milestones', label: 'Milestones', path: 'milestones' },
-  { id: 'plan', label: 'Plan', path: 'plan' },
-  { id: 'people', label: 'People', path: 'people' },
-  { id: 'payments', label: 'Payments', path: 'payments' },
-  { id: 'uat', label: 'UAT', path: 'uat' },
-  { id: 'raid', label: 'RAID', path: 'raid' },
-  { id: 'feedback', label: 'Feedback', path: 'feedback' },
-  { id: 'documents', label: 'Documents', path: 'documents' }
+  { id: 'health',        label: 'Health',         path: 'health' },
+  { id: 'sow',           label: 'SOW',            path: 'sow' },
+  { id: 'milestones',    label: 'Milestones',     path: 'milestones' },
+  { id: 'plan',          label: 'Plan',           path: 'plan' },
+  { id: 'delivery-plan', label: 'Delivery Plan',  path: 'delivery-plan' },
+  { id: 'people',        label: 'People',         path: 'people' },
+  { id: 'payments',      label: 'Payments',       path: 'payments' },
+  { id: 'uat',           label: 'UAT',            path: 'uat' },
+  { id: 'raid',          label: 'RAID',           path: 'raid' },
+  { id: 'feedback',      label: 'Feedback',       path: 'feedback' },
+  { id: 'documents',     label: 'Documents',      path: 'documents' },
 ];
 
 export default function ProjectPage() {
@@ -137,6 +139,7 @@ export default function ProjectPage() {
             element={<MilestonesTab project={project} canEdit={canEdit} />}
           />
           <Route path="plan" element={<ProjectPlan project={project} canEdit={canEdit} />} />
+          <Route path="delivery-plan" element={<DeliveryPlanTab project={project} canEdit={canEdit} />} />
           <Route path="people" element={<PeopleTab project={project} canEdit={canEdit} />} />
           <Route
             path="payments"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Plus, MoreVertical, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getUATItems, upsertUATItem, deleteUATItem, getPeople } from '../../../lib/supabase';
@@ -77,6 +77,59 @@ export default function UATTab({ project, canEdit }) {
     batch_2_start: '', batch_2_end: '',
     batch_3_start: '', batch_3_end: '',
   });
+  const [batchCfgId, setBatchCfgId] = useState(null);
+
+  // ── Column widths (resizable) ────────────────────────────────────────────────
+  const COL_LS_KEY = `uatCols_${project?.id}`;
+  const DEFAULT_COLS = {
+    actions: 32, process: 180, status: 130, approver: 130,
+    batch1: 100, batch2: 100, batch3: 100,
+    paper: 80, elim: 80, auto: 80, ctrl: 80, rem: 80, inter: 80, comp: 90,
+  };
+  const [colWidths, setColWidths] = useState(() => {
+    try { const s = localStorage.getItem(COL_LS_KEY); return s ? { ...DEFAULT_COLS, ...JSON.parse(s) } : { ...DEFAULT_COLS }; }
+    catch { return { ...DEFAULT_COLS }; }
+  });
+  const colResizingRef = useRef(null);
+
+  // ── Row heights (resizable) ──────────────────────────────────────────────────
+  const ROW_LS_KEY = `uatRows_${project?.id}`;
+  const [rowHeights, setRowHeights] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(ROW_LS_KEY)) || {}; }
+    catch { return {}; }
+  });
+  const rowResizingRef = useRef(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(COL_LS_KEY, JSON.stringify(colWidths)); } catch {}
+  }, [colWidths]);
+  useEffect(() => {
+    try { localStorage.setItem(ROW_LS_KEY, JSON.stringify(rowHeights)); } catch {}
+  }, [rowHeights]);
+
+  useEffect(() => {
+    const onMove = e => {
+      if (colResizingRef.current) {
+        const { key, startX, startW } = colResizingRef.current;
+        setColWidths(p => ({ ...p, [key]: Math.max(50, startW + (e.clientX - startX)) }));
+      }
+      if (rowResizingRef.current) {
+        const { id, startY, startH } = rowResizingRef.current;
+        setRowHeights(p => ({ ...p, [id]: Math.max(28, startH + (e.clientY - startY)) }));
+      }
+    };
+    const onUp = () => { colResizingRef.current = null; rowResizingRef.current = null; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
+  const ResizeHandle = ({ colKey }) => (
+    <div
+      className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 z-10"
+      onMouseDown={e => { e.preventDefault(); e.stopPropagation(); colResizingRef.current = { key: colKey, startX: e.clientX, startW: colWidths[colKey] }; }}
+    />
+  );
 
   const isMES      = project?.uat_type === 'mes';
   const isLogbooks = project?.uat_type === 'logbooks';
@@ -95,14 +148,17 @@ export default function UATTab({ project, canEdit }) {
         setUatItems(items || []);
         setPeople(peopleList || []);
         const cfg = (items || []).find(i => i.group_name === '__batch_config');
-        if (cfg) setBatchDates({
-          batch_1_start: cfg.batch_1_start || '',
-          batch_1_end:   cfg.batch_1_end   || '',
-          batch_2_start: cfg.batch_2_start || '',
-          batch_2_end:   cfg.batch_2_end   || '',
-          batch_3_start: cfg.batch_3_start || '',
-          batch_3_end:   cfg.batch_3_end   || '',
-        });
+        if (cfg) {
+          setBatchCfgId(cfg.id);
+          setBatchDates({
+            batch_1_start: cfg.batch_1_start || '',
+            batch_1_end:   cfg.batch_1_end   || '',
+            batch_2_start: cfg.batch_2_start || '',
+            batch_2_end:   cfg.batch_2_end   || '',
+            batch_3_start: cfg.batch_3_start || '',
+            batch_3_end:   cfg.batch_3_end   || '',
+          });
+        }
       } catch { toast.error('Failed to load UAT data'); }
       finally   { setLoading(false); }
     }
@@ -124,8 +180,8 @@ export default function UATTab({ project, canEdit }) {
       return (item) => {
         clearTimeout(t);
         t = setTimeout(async () => {
-          try { await upsertUATItem(project.id, item); }
-          catch { toast.error('Failed to save UAT item'); }
+          try { await upsertUATItem(item); }
+          catch (e) { toast.error('Failed to save UAT item: ' + (e?.message || '')); }
         }, 800);
       };
     })(),
@@ -144,23 +200,29 @@ export default function UATTab({ project, canEdit }) {
   const handleBatchDateChange = useCallback((key, value) => {
     setBatchDates(prev => {
       const next = { ...prev, [key]: value };
-      // Save to config row
-      const cfg = uatItems.find(i => i.group_name === '__batch_config') || {
-        id: `batch_cfg_${project.id}`, project_id: project.id, group_name: '__batch_config',
+      const cfgId = batchCfgId || crypto.randomUUID();
+      if (!batchCfgId) setBatchCfgId(cfgId);
+      const cfgRow = {
+        id: cfgId,
+        project_id: project.id,
+        group_name: '__batch_config',
+        sort_order: -1,
+        ...next,
       };
-      debouncedSave({ ...cfg, ...next });
+      debouncedSave(cfgRow);
       return next;
     });
-  }, [uatItems, project.id, debouncedSave]);
+  }, [batchCfgId, project.id, debouncedSave]);
 
   const handleAddRow = useCallback((groupName) => {
     const newItem = {
-      id: `uat_${Date.now()}`,
+      id: crypto.randomUUID(),
       project_id: project.id,
       group_name: groupName,
       process_name: '',
       status: 'Not Started',
       uat_approver_id: null,
+      sort_order: Date.now(),
       ...(isMES && {
         batch_1_status: 'Not Started',
         batch_2_status: 'Not Started',
@@ -194,6 +256,8 @@ export default function UATTab({ project, canEdit }) {
     return result;
   }, [uatItems, groups]);
 
+  const cw = k => ({ width: colWidths[k], minWidth: colWidths[k] });
+
   if (loading) return <div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" /></div>;
 
   if (!isMES && !isLogbooks) return (
@@ -202,11 +266,7 @@ export default function UATTab({ project, canEdit }) {
     </div>
   );
 
-  // ── Column definitions ───────────────────────────────────────────────────────
-  // MES: process | status | approver | B1 | B2 | B3 | paper | elim | auto | ctrl | rem | inter | comp
-  // LOG: process | status | approver | paper | elim | auto | ctrl | rem | inter | comp
-
-  const thCls = 'px-2 py-1.5 text-center font-semibold text-[10px] text-gray-700 border-r border-gray-300';
+  const thCls = 'relative px-2 py-1.5 text-center font-semibold text-[10px] text-gray-700 border-r border-gray-300';
   const tdCls = 'px-2 py-1 border-r border-gray-200 text-xs';
   const superTh = 'px-2 py-1 text-center text-xs font-bold border-r border-gray-300 bg-gray-200';
 
@@ -214,12 +274,12 @@ export default function UATTab({ project, canEdit }) {
     <div className="p-6 space-y-4">
       <h3 className="text-lg font-semibold">{isMES ? 'MES' : 'Logbooks'} UAT Tracker</h3>
 
-      <div className="overflow-x-auto border border-gray-300 rounded-lg">
-        <table className="border-collapse text-xs w-full">
+      <div className="overflow-x-auto border border-gray-300 rounded-lg select-none">
+        <table className="border-collapse text-xs" style={{ minWidth: '100%' }}>
           <thead>
             {/* ── Super-header row ── */}
             <tr className="bg-gray-200 border-b border-gray-300">
-              <th className={`${superTh} w-8`} />
+              <th className={`${superTh} w-8`} rowSpan={2} />
               <th colSpan={3} className={`${superTh} text-left`}>Configuration</th>
               {isMES && <th colSpan={3} className={superTh}>UAT</th>}
               <th colSpan={7} className={superTh}>Case Study</th>
@@ -227,31 +287,46 @@ export default function UATTab({ project, canEdit }) {
 
             {/* ── Column headers ── */}
             <tr className="bg-gray-100 border-b border-gray-300">
-              <th className={`${thCls} w-8`} />
-              <th className={`${thCls} text-left w-40`}>Process Name</th>
-              <th className={`${thCls} w-28`}>Status</th>
-              <th className={`${thCls} w-32`}>UAT Approver</th>
+              <th className={thCls} style={cw('process')}>
+                Process Name
+                <ResizeHandle colKey="process" />
+              </th>
+              <th className={thCls} style={cw('status')}>
+                Status
+                <ResizeHandle colKey="status" />
+              </th>
+              <th className={thCls} style={cw('approver')}>
+                UAT Approver
+                <ResizeHandle colKey="approver" />
+              </th>
               {isMES && <>
-                <th className={`${thCls} w-24`}>Batch 1</th>
-                <th className={`${thCls} w-24`}>Batch 2</th>
-                <th className={`${thCls} w-24`}>Batch 3</th>
+                <th className={thCls} style={cw('batch1')}>Batch 1<ResizeHandle colKey="batch1" /></th>
+                <th className={thCls} style={cw('batch2')}>Batch 2<ResizeHandle colKey="batch2" /></th>
+                <th className={thCls} style={cw('batch3')}>Batch 3<ResizeHandle colKey="batch3" /></th>
               </>}
-              <th className={`${thCls} w-20`}>Paper Fields</th>
-              <th className={`${thCls} w-20`}>Eliminated</th>
-              <th className={`${thCls} w-20`}>Automated</th>
-              <th className={`${thCls} w-20`}>Controlled</th>
-              <th className={`${thCls} w-20`}>Remaining</th>
-              <th className={`${thCls} w-20`}>Interlocks</th>
-              <th className="px-2 py-1.5 text-center font-semibold text-[10px] text-gray-700 w-24">Compliance Score</th>
+              {[
+                ['paper',  'Paper Fields'],
+                ['elim',   'Eliminated'],
+                ['auto',   'Automated'],
+                ['ctrl',   'Controlled'],
+                ['rem',    'Remaining'],
+                ['inter',  'Interlocks'],
+                ['comp',   'Compliance Score'],
+              ].map(([k, label]) => (
+                <th key={k} className={thCls} style={cw(k)}>
+                  {label}
+                  <ResizeHandle colKey={k} />
+                </th>
+              ))}
             </tr>
 
             {/* ── Batch date rows (MES only) ── */}
             {isMES && <>
               <tr className="bg-blue-50 border-b border-gray-200">
-                <td className={`${tdCls} text-gray-500 font-medium`} />
+                <td className={`${tdCls} text-gray-500 font-medium`} style={cw('actions')} />
                 <td className={`${tdCls} font-medium text-gray-600`} colSpan={3}>Start Date</td>
                 {[1,2,3].map(n => (
-                  <td key={n} className={tdCls}>
+                  <td key={n} className={tdCls} style={cw(`batch${n}`)}>
                     <input type="date" value={batchDates[`batch_${n}_start`] || ''} disabled={!canEdit}
                       onChange={e => handleBatchDateChange(`batch_${n}_start`, e.target.value)}
                       className="w-full px-1 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
@@ -260,10 +335,10 @@ export default function UATTab({ project, canEdit }) {
                 <td colSpan={7} />
               </tr>
               <tr className="bg-blue-50 border-b border-gray-300">
-                <td className={tdCls} />
+                <td className={tdCls} style={cw('actions')} />
                 <td className={`${tdCls} font-medium text-gray-600`} colSpan={3}>End Date</td>
                 {[1,2,3].map(n => (
-                  <td key={n} className={tdCls}>
+                  <td key={n} className={tdCls} style={cw(`batch${n}`)}>
                     <input type="date" value={batchDates[`batch_${n}_end`] || ''} disabled={!canEdit}
                       onChange={e => handleBatchDateChange(`batch_${n}_end`, e.target.value)}
                       className="w-full px-1 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
@@ -284,9 +359,13 @@ export default function UATTab({ project, canEdit }) {
 
                 {/* Data rows */}
                 {groupedItems[groupName]?.map((item, idx) => (
-                  <tr key={item.id} className={idx % 2 === 0 ? 'bg-white border-b' : 'bg-gray-50 border-b'}>
+                  <tr
+                    key={item.id}
+                    className={idx % 2 === 0 ? 'bg-white border-b' : 'bg-gray-50 border-b'}
+                    style={{ height: rowHeights[item.id] || 36, position: 'relative' }}
+                  >
                     {/* Three-dots menu */}
-                    <td className="px-1 py-1 border-r border-gray-200 w-8">
+                    <td className="px-1 py-1 border-r border-gray-200" style={cw('actions')}>
                       <div className="relative flex items-center justify-center">
                         <button onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === item.id ? null : item.id); }}
                           className="p-0.5 hover:bg-gray-200 rounded">
@@ -307,13 +386,13 @@ export default function UATTab({ project, canEdit }) {
                     </td>
 
                     {/* Process Name */}
-                    <td className={tdCls}>
+                    <td className={tdCls} style={cw('process')}>
                       <TextCell value={item.process_name} disabled={!canEdit} placeholder="Process name…"
                         onChange={v => handleChange(item.id, 'process_name', v)} />
                     </td>
 
                     {/* Status */}
-                    <td className={tdCls}>
+                    <td className={tdCls} style={cw('status')}>
                       {canEdit
                         ? <ColoredSelect value={item.status} options={UAT_STATUS_OPTIONS} colorMap={STATUS_COLORS}
                             onChange={v => handleChange(item.id, 'status', v)} />
@@ -322,7 +401,7 @@ export default function UATTab({ project, canEdit }) {
                     </td>
 
                     {/* UAT Approver */}
-                    <td className={tdCls}>
+                    <td className={tdCls} style={cw('approver')}>
                       {canEdit
                         ? <select value={item.uat_approver_id || ''} onChange={e => handleChange(item.id, 'uat_approver_id', e.target.value)}
                             className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs bg-white focus:outline-none focus:border-blue-400">
@@ -335,7 +414,7 @@ export default function UATTab({ project, canEdit }) {
 
                     {/* Batch statuses (MES only) */}
                     {isMES && [1,2,3].map(n => (
-                      <td key={n} className={tdCls}>
+                      <td key={n} className={tdCls} style={cw(`batch${n}`)}>
                         {canEdit
                           ? <ColoredSelect value={item[`batch_${n}_status`]} options={UAT_BATCH_STATUS_OPTIONS}
                               colorMap={BATCH_STATUS_COLORS} onChange={v => handleChange(item.id, `batch_${n}_status`, v)} />
@@ -345,11 +424,29 @@ export default function UATTab({ project, canEdit }) {
                     ))}
 
                     {/* Numeric fields */}
-                    {['paper_fields','eliminated','automated','controlled','remaining','interlocks','compliance_score'].map(f => (
-                      <td key={f} className={`${tdCls} text-right`}>
-                        <NumCell value={item[f]} disabled={!canEdit} onChange={v => handleChange(item.id, f, v)} />
+                    {[
+                      ['paper_fields',     'paper'],
+                      ['eliminated',       'elim'],
+                      ['automated',        'auto'],
+                      ['controlled',       'ctrl'],
+                      ['remaining',        'rem'],
+                      ['interlocks',       'inter'],
+                      ['compliance_score', 'comp'],
+                    ].map(([field, colKey]) => (
+                      <td key={field} className={`${tdCls} text-right`} style={cw(colKey)}>
+                        <NumCell value={item[field]} disabled={!canEdit} onChange={v => handleChange(item.id, field, v)} />
                       </td>
                     ))}
+
+                    {/* Row resize handle */}
+                    <td
+                      className="absolute bottom-0 left-0 right-0 h-1 cursor-row-resize hover:bg-blue-300 opacity-0 hover:opacity-50"
+                      style={{ display: 'block', position: 'absolute' }}
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        rowResizingRef.current = { id: item.id, startY: e.clientY, startH: rowHeights[item.id] || 36 };
+                      }}
+                    />
                   </tr>
                 ))}
 
