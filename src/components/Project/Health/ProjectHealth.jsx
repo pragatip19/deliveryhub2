@@ -3,7 +3,7 @@ import { Edit2, Save, X, AlertTriangle, Activity, TrendingUp, TrendingDown, Minu
 import toast from 'react-hot-toast';
 import { getPlanTasks, updateProject, getRaidItems } from '../../../lib/supabase';
 import { calcSOWCompletion, getActiveTasks, getKickoffDate, getProjectedGoLive, recalculatePlan } from '../../../lib/calculations';
-import { networkdays, addWorkdays, formatDate, formatDateInput, today, parseDate } from '../../../lib/workdays';
+import { networkdays, addWorkdays, formatDate, formatDateInput, today, parseDate, toDateStr } from '../../../lib/workdays';
 
 function getTargetDays(categoryName) {
   if (!categoryName) return 72;
@@ -173,14 +173,15 @@ export default function ProjectHealth({ project, canEdit }) {
     'Not Started':'bg-slate-100 text-slate-600 border-slate-200',
   }[statusLabel];
 
-  const todayISO    = new Date().toISOString().split('T')[0];
+  const todayISO    = toDateStr(today());
   const todayTasks  = useMemo(() =>
-    // Show In Progress tasks (actively being worked on) — excludes Done/NA
-    // and avoids flooding from Not Started tasks whose planned_end cascaded to today
+    // Show tasks whose planned_start is today — tasks that are due to begin today
     tasks.filter(t =>
-      t.status === 'In Progress' && t.status !== 'Not Applicable'
+      t.planned_start === todayISO &&
+      t.status !== 'Done' &&
+      t.status !== 'Not Applicable'
     ),
-    [tasks]
+    [tasks, todayISO]
   );
   const urgentTasks = useMemo(() =>
     tasks.filter(t => {

@@ -39,9 +39,9 @@ function deriveMilestoneStatus(tasks) {
 }
 
 // ─── Default column widths (px) ────────────────────────────────────────────
-const COL_DEFAULTS = { num: 48, name: 224, status: 128, start: 112, end: 112 };
-const ROW_HEIGHT_DEFAULT = 64; // px
-const WEEK_COL_DEFAULT = 96;   // px (was min-w-24)
+const COL_DEFAULTS = { num: 32, name: 160, status: 100, start: 84, end: 84 };
+const ROW_HEIGHT_DEFAULT = 36; // px
+const WEEK_COL_DEFAULT = 52;   // px — small enough that all weeks fit without scrolling
 const LS_COL_KEY  = 'msColWidths';
 const LS_ROW_KEY  = 'msRowHeight';
 const LS_WEEK_KEY = 'msWeekColWidth';
@@ -229,6 +229,22 @@ const MilestonesTab = ({ project, canEdit }) => {
     return weekStart <= mEnd && weekEnd >= mStart;
   };
 
+  // Derive status for a specific week's tasks within a milestone
+  const getWeekStatus = (milestone, weekStart) => {
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    // Find tasks belonging to this milestone that overlap this week
+    const weekTasks = tasks.filter(t => {
+      if (t.milestone !== milestone.id && t.milestone !== milestone.name) return false;
+      if (!t.planned_start || !t.planned_end) return false;
+      const ts = new Date(t.planned_start);
+      const te = new Date(t.planned_end);
+      return ts <= weekEnd && te >= weekStart;
+    });
+    if (weekTasks.length === 0) return milestone.derivedStatus || milestone.status || 'Not Started';
+    return deriveMilestoneStatus(weekTasks);
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'Done':        return 'bg-emerald-200';
@@ -378,7 +394,7 @@ const MilestonesTab = ({ project, canEdit }) => {
             {/* ── Header row ───────────────────────────────────────────── */}
             <div
               className="sticky top-0 z-20 flex bg-gray-100 border-b border-gray-300"
-              style={{ height: 44 }}
+              style={{ height: 46 }}
             >
               {/* Frozen header cells — sticky left */}
               <div
@@ -436,32 +452,51 @@ const MilestonesTab = ({ project, canEdit }) => {
                 <RowResizeHandle />
               </div>
 
-              {/* Gantt week/month headers */}
+              {/* Gantt week/month headers — two-row: month name + W1/W2/W3/W4 */}
               {monthsRange.length === 0 ? (
                 <div className="flex items-center px-4 text-xs text-gray-400">No date range</div>
               ) : (
-                monthsRange.map((month) => {
-                  const monthWeeks = weeks.filter(
-                    (w) => w.getFullYear() === month.getFullYear() && w.getMonth() === month.getMonth()
-                  );
-                  return (
-                    <div key={month.toISOString()} className="flex border-r border-gray-300">
-                      {monthWeeks.map((week) => (
+                <div className="flex flex-col flex-1">
+                  {/* Row A: month name spanning its weeks */}
+                  <div className="flex" style={{ height: 22, borderBottom: '1px solid #d1d5db' }}>
+                    {monthsRange.map((month) => {
+                      const monthWeeks = weeks.filter(
+                        (w) => w.getFullYear() === month.getFullYear() && w.getMonth() === month.getMonth()
+                      );
+                      return (
                         <div
-                          key={week.toISOString()}
-                          className="relative flex items-center justify-center px-2 font-semibold text-gray-700 text-xs border-r border-gray-300"
-                          style={weekW}
+                          key={month.toISOString()}
+                          className="flex items-center justify-center font-bold text-gray-700 border-r border-gray-300 text-[10px]"
+                          style={{ width: weekColWidth * monthWeeks.length, minWidth: weekColWidth * monthWeeks.length }}
                         >
-                          <span className="text-gray-500 mr-1 text-xs">
-                            {month.toLocaleString('default', { month: 'short' })}
-                          </span>
-                          W{weeks.indexOf(week) + 1}
-                          <WeekResizeHandle />
+                          {month.toLocaleString('default', { month: 'short' })} {month.getFullYear()}
                         </div>
-                      ))}
-                    </div>
-                  );
-                })
+                      );
+                    })}
+                  </div>
+                  {/* Row B: W1/W2/W3/W4 per month */}
+                  <div className="flex" style={{ height: 22 }}>
+                    {monthsRange.map((month) => {
+                      const monthWeeks = weeks.filter(
+                        (w) => w.getFullYear() === month.getFullYear() && w.getMonth() === month.getMonth()
+                      );
+                      return (
+                        <div key={month.toISOString()} className="flex border-r border-gray-300">
+                          {monthWeeks.map((week, wi) => (
+                            <div
+                              key={week.toISOString()}
+                              className="relative flex items-center justify-center font-semibold text-gray-600 text-[10px] border-r border-gray-200"
+                              style={weekW}
+                            >
+                              W{wi + 1}
+                              <WeekResizeHandle />
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
             </div>
 
@@ -519,7 +554,7 @@ const MilestonesTab = ({ project, canEdit }) => {
 
                     {/* # */}
                     <div
-                      className="flex items-center justify-center px-3 text-sm text-gray-600 border-r border-gray-200 font-medium flex-shrink-0"
+                      className="flex items-center justify-center px-1 text-xs text-gray-600 border-r border-gray-200 font-medium flex-shrink-0"
                       style={cellW('num')}
                     >
                       {index + 1}
@@ -593,7 +628,7 @@ const MilestonesTab = ({ project, canEdit }) => {
 
                     {/* Start Date */}
                     <div
-                      className="flex items-center px-3 text-xs text-gray-600 border-r border-gray-200 flex-shrink-0"
+                      className="flex items-center px-1 text-[10px] text-gray-600 border-r border-gray-200 flex-shrink-0"
                       style={cellW('start')}
                     >
                       {milestone.start_date ? formatDate(new Date(milestone.start_date)) : '—'}
@@ -601,7 +636,7 @@ const MilestonesTab = ({ project, canEdit }) => {
 
                     {/* End Date */}
                     <div
-                      className="flex items-center px-3 text-xs text-gray-600 border-r border-gray-200 flex-shrink-0"
+                      className="flex items-center px-1 text-[10px] text-gray-600 border-r border-gray-200 flex-shrink-0"
                       style={cellW('end')}
                     >
                       {milestone.end_date ? formatDate(new Date(milestone.end_date)) : '—'}
@@ -617,18 +652,18 @@ const MilestonesTab = ({ project, canEdit }) => {
                       <div key={month.toISOString()} className="flex border-r border-gray-300">
                         {monthWeeks.map((week) => {
                           const inMilestone = isWeekInMilestone(milestone, week);
-                          const displayStatus = milestone.derivedStatus || milestone.status || 'Not Started';
+                          const weekStatus = inMilestone ? getWeekStatus(milestone, week) : null;
                           return (
                             <div
                               key={week.toISOString()}
-                              className={`border-r border-gray-200 flex items-center justify-center text-xs font-medium ${
+                              className={`border-r border-gray-200 flex items-center justify-center font-medium ${
                                 inMilestone
-                                  ? `${getStatusColor(displayStatus)} text-gray-900`
+                                  ? `${getStatusColor(weekStatus)} text-gray-900`
                                   : 'bg-white text-gray-300'
                               }`}
-                              style={{ ...weekW, height: rowHeight }}
+                              style={{ ...weekW, height: rowHeight, fontSize: 9 }}
                             >
-                              {inMilestone && displayStatus}
+                              {inMilestone && weekStatus}
                             </div>
                           );
                         })}

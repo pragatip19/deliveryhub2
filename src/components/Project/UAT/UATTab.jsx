@@ -1,48 +1,91 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Trash2, Plus } from 'lucide-react';
+import { Plus, MoreVertical, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getUATItems, upsertUATItem, deleteUATItem, getPeople } from '../../../lib/supabase';
-import { MES_UAT_TEMPLATE, LOGBOOKS_UAT_TEMPLATE, UAT_STATUS_OPTIONS, UAT_BATCH_STATUS_OPTIONS } from '../../../lib/templates';
+import { UAT_STATUS_OPTIONS, UAT_BATCH_STATUS_OPTIONS } from '../../../lib/templates';
 import { useAuth } from '../../../contexts/AuthContext';
 
+// ── Color maps ────────────────────────────────────────────────────────────────
 const STATUS_COLORS = {
-  'Not Started': 'bg-gray-100 text-gray-800',
-  'Ready for UAT': 'bg-blue-100 text-blue-800',
-  'In Progress': 'bg-yellow-100 text-yellow-800',
-  'Under Reconfig': 'bg-orange-100 text-orange-800',
-  'UAT Complete': 'bg-green-100 text-green-800',
-  'Signed Off': 'bg-emerald-100 text-emerald-800',
+  'Not Started':    'bg-gray-100 text-gray-700',
+  'Ready for UAT':  'bg-blue-100 text-blue-700',
+  'In Progress':    'bg-yellow-100 text-yellow-800',
+  'Under Reconfig': 'bg-orange-100 text-orange-700',
+  'UAT Complete':   'bg-green-100 text-green-800',
+  'Signed Off':     'bg-emerald-100 text-emerald-800',
 };
-
 const BATCH_STATUS_COLORS = {
-  'Not Started': 'bg-gray-100 text-gray-800',
+  'Not Started': 'bg-gray-100 text-gray-600',
   'In Progress': 'bg-yellow-100 text-yellow-800',
-  'Done': 'bg-green-100 text-green-800',
-  'Blocked': 'bg-red-100 text-red-800',
+  'Done':        'bg-emerald-100 text-emerald-700',
+  'Blocked':     'bg-red-100 text-red-700',
 };
 
-const UATTab = ({ project, canEdit }) => {
+const ColoredSelect = ({ value, options, colorMap, onChange, disabled }) => {
+  const cls = colorMap[value] || 'bg-white text-gray-700';
+  return (
+    <select
+      value={value || ''}
+      onChange={e => onChange(e.target.value)}
+      disabled={disabled}
+      className={`w-full px-1.5 py-0.5 rounded text-xs font-medium border border-gray-200 focus:outline-none focus:border-blue-400 ${cls}`}
+    >
+      <option value="">—</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+};
+
+// ── MES UAT groups ────────────────────────────────────────────────────────────
+const MES_GROUPS = ['BMR', 'BPR', 'Logbooks / Processes'];
+const LOG_GROUPS = ['Logbooks / Processes'];
+
+// ── Editable number cell ──────────────────────────────────────────────────────
+const NumCell = ({ value, onChange, disabled }) => (
+  <input
+    type="number"
+    value={value ?? ''}
+    onChange={e => onChange(parseInt(e.target.value) || 0)}
+    disabled={disabled}
+    className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs text-right focus:outline-none focus:border-blue-400 disabled:bg-transparent disabled:border-transparent"
+    style={{ minWidth: 48 }}
+  />
+);
+
+// ── Editable text cell ────────────────────────────────────────────────────────
+const TextCell = ({ value, onChange, disabled, placeholder }) => (
+  <input
+    type="text"
+    value={value || ''}
+    onChange={e => onChange(e.target.value)}
+    disabled={disabled}
+    placeholder={placeholder}
+    className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent disabled:border-transparent"
+  />
+);
+
+export default function UATTab({ project, canEdit }) {
   const { user, isAdmin, isDM } = useAuth();
   const [uatItems, setUatItems] = useState([]);
-  const [people, setPeople] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
-  const [filters, setFilters] = useState({});
+  const [people, setPeople]     = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [openMenuId, setOpenMenuId] = useState(null);
+
+  // Global batch dates
   const [batchDates, setBatchDates] = useState({
-    batch_1_start: null,
-    batch_1_end: null,
-    batch_2_start: null,
-    batch_2_end: null,
-    batch_3_start: null,
-    batch_3_end: null,
+    batch_1_start: '', batch_1_end: '',
+    batch_2_start: '', batch_2_end: '',
+    batch_3_start: '', batch_3_end: '',
   });
 
-  const isMESUAT = project?.uat_type === 'mes';
-  const isLogbooksUAT = project?.uat_type === 'logbooks';
-  const canDeleteRows = isAdmin() || isDM();
+  const isMES      = project?.uat_type === 'mes';
+  const isLogbooks = project?.uat_type === 'logbooks';
+  const groups     = isMES ? MES_GROUPS : LOG_GROUPS;
+  const canDelete  = isAdmin() || isDM();
 
+  // ── Load ────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const loadData = async () => {
+    async function load() {
       try {
         setLoading(true);
         const [items, peopleList] = await Promise.all([
@@ -51,486 +94,281 @@ const UATTab = ({ project, canEdit }) => {
         ]);
         setUatItems(items || []);
         setPeople(peopleList || []);
-
-        // Extract batch dates from config row if exists
-        const configRow = items?.find(item => item.group_name === '__batch_config');
-        if (configRow) {
-          setBatchDates({
-            batch_1_start: configRow.batch_1_start,
-            batch_1_end: configRow.batch_1_end,
-            batch_2_start: configRow.batch_2_start,
-            batch_2_end: configRow.batch_2_end,
-            batch_3_start: configRow.batch_3_start,
-            batch_3_end: configRow.batch_3_end,
-          });
-        }
-      } catch (error) {
-        console.error('Error loading UAT data:', error);
-        toast.error('Failed to load UAT data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (project?.id) {
-      loadData();
+        const cfg = (items || []).find(i => i.group_name === '__batch_config');
+        if (cfg) setBatchDates({
+          batch_1_start: cfg.batch_1_start || '',
+          batch_1_end:   cfg.batch_1_end   || '',
+          batch_2_start: cfg.batch_2_start || '',
+          batch_2_end:   cfg.batch_2_end   || '',
+          batch_3_start: cfg.batch_3_start || '',
+          batch_3_end:   cfg.batch_3_end   || '',
+        });
+      } catch { toast.error('Failed to load UAT data'); }
+      finally   { setLoading(false); }
     }
+    if (project?.id) load();
   }, [project?.id]);
 
+  // Close menu on outside click
+  useEffect(() => {
+    if (!openMenuId) return;
+    const h = () => setOpenMenuId(null);
+    document.addEventListener('click', h);
+    return () => document.removeEventListener('click', h);
+  }, [openMenuId]);
+
+  // ── Save helpers ─────────────────────────────────────────────────────────────
   const debouncedSave = useCallback(
     (() => {
-      let timeoutId;
+      let t;
       return (item) => {
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(async () => {
-          try {
-            await upsertUATItem(project.id, item);
-            toast.success('UAT item saved');
-          } catch (error) {
-            console.error('Error saving UAT item:', error);
-            toast.error('Failed to save UAT item');
-          }
+        clearTimeout(t);
+        t = setTimeout(async () => {
+          try { await upsertUATItem(project.id, item); }
+          catch { toast.error('Failed to save UAT item'); }
         }, 800);
       };
     })(),
     [project.id]
   );
 
-  const handleCellChange = useCallback(
-    (itemId, field, value) => {
-      setUatItems(prevItems =>
-        prevItems.map(item =>
-          item.id === itemId ? { ...item, [field]: value } : item
-        )
-      );
+  const handleChange = useCallback((itemId, field, value) => {
+    setUatItems(prev => {
+      const next = prev.map(i => i.id === itemId ? { ...i, [field]: value } : i);
+      const item = next.find(i => i.id === itemId);
+      if (item) debouncedSave(item);
+      return next;
+    });
+  }, [debouncedSave]);
 
-      const item = uatItems.find(i => i.id === itemId);
-      if (item) {
-        debouncedSave({ ...item, [field]: value });
-      }
-    },
-    [uatItems, debouncedSave]
-  );
-
-  const handleBatchDateChange = useCallback(
-    (batchNum, dateType, value) => {
-      const key = `batch_${batchNum}_${dateType}`;
-      setBatchDates(prev => ({ ...prev, [key]: value }));
-
+  const handleBatchDateChange = useCallback((key, value) => {
+    setBatchDates(prev => {
+      const next = { ...prev, [key]: value };
       // Save to config row
-      const configRow = uatItems.find(item => item.group_name === '__batch_config');
-      const configData = configRow || {
-        id: `batch_config_${project.id}`,
-        project_id: project.id,
-        group_name: '__batch_config',
-        process_name: 'Batch Configuration',
+      const cfg = uatItems.find(i => i.group_name === '__batch_config') || {
+        id: `batch_cfg_${project.id}`, project_id: project.id, group_name: '__batch_config',
       };
+      debouncedSave({ ...cfg, ...next });
+      return next;
+    });
+  }, [uatItems, project.id, debouncedSave]);
 
-      debouncedSave({
-        ...configData,
-        [key]: value,
-      });
-    },
-    [uatItems, project.id, debouncedSave]
-  );
+  const handleAddRow = useCallback((groupName) => {
+    const newItem = {
+      id: `uat_${Date.now()}`,
+      project_id: project.id,
+      group_name: groupName,
+      process_name: '',
+      status: 'Not Started',
+      uat_approver_id: null,
+      ...(isMES && {
+        batch_1_status: 'Not Started',
+        batch_2_status: 'Not Started',
+        batch_3_status: 'Not Started',
+        paper_fields: 0, eliminated: 0, automated: 0,
+        controlled: 0, remaining: 0, interlocks: 0, compliance_score: 0,
+      }),
+      ...(!isMES && {
+        paper_fields: 0, eliminated: 0, automated: 0,
+        controlled: 0, remaining: 0, interlocks: 0, compliance_score: 0,
+      }),
+    };
+    setUatItems(prev => [...prev, newItem]);
+    debouncedSave(newItem);
+  }, [project.id, isMES, debouncedSave]);
 
-  const handleAddRow = useCallback(
-    (groupName) => {
-      const newItem = {
-        id: `uat_${Date.now()}`,
-        project_id: project.id,
-        group_name: groupName,
-        process_name: '',
-        status: 'Not Started',
-        uat_approver_id: null,
-        ...(isMESUAT && {
-          batch_1_start: null,
-          batch_1_end: null,
-          batch_1_status: 'Not Started',
-          batch_2_start: null,
-          batch_2_end: null,
-          batch_2_status: 'Not Started',
-          batch_3_start: null,
-          batch_3_end: null,
-          batch_3_status: 'Not Started',
-          paper_fields: 0,
-          eliminated: 0,
-          automated: 0,
-          controlled: 0,
-          remaining: 0,
-          interlocks: 0,
-          compliance_score: 0,
-        }),
-        ...(isLogbooksUAT && {
-          paper_fields: 0,
-          eliminated: 0,
-          automated: 0,
-          controlled: 0,
-          remaining: 0,
-          interlocks: 0,
-          compliance_score: 0,
-        }),
-      };
+  const handleDeleteRow = useCallback(async (itemId) => {
+    try {
+      await deleteUATItem(itemId);
+      setUatItems(prev => prev.filter(i => i.id !== itemId));
+      toast.success('Deleted');
+    } catch { toast.error('Failed to delete'); }
+  }, []);
 
-      setUatItems(prev => [...prev, newItem]);
-      debouncedSave(newItem);
-    },
-    [project.id, isMESUAT, isLogbooksUAT, debouncedSave]
-  );
-
-  const handleDeleteRow = useCallback(
-    async (itemId) => {
-      try {
-        await deleteUATItem(itemId);
-        setUatItems(prev => prev.filter(item => item.id !== itemId));
-        toast.success('UAT item deleted');
-      } catch (error) {
-        console.error('Error deleting UAT item:', error);
-        toast.error('Failed to delete UAT item');
-      }
-    },
-    []
-  );
-
+  // ── Group rows ───────────────────────────────────────────────────────────────
   const groupedItems = useMemo(() => {
-    const groups = isMESUAT
-      ? ['BMR', 'BPR', 'Logbooks / Processes']
-      : ['Logbooks / Processes'];
+    const result = {};
+    groups.forEach(g => {
+      result[g] = uatItems.filter(i => i.group_name === g && i.group_name !== '__batch_config');
+    });
+    return result;
+  }, [uatItems, groups]);
 
-    return groups.reduce((acc, group) => {
-      acc[group] = uatItems.filter(
-        item => item.group_name === group && item.group_name !== '__batch_config'
-      );
-      return acc;
-    }, {});
-  }, [uatItems, isMESUAT]);
+  if (loading) return <div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" /></div>;
 
-  const renderStatusPill = (status, colorMap) => {
-    const colors = colorMap[status] || 'bg-gray-100 text-gray-800';
-    return (
-      <span className={`px-2 py-1 rounded text-sm font-medium ${colors}`}>
-        {status}
-      </span>
-    );
-  };
-
-  const renderCell = (item, field, itemId) => {
-    const value = item[field];
-    const isDateField = field.includes('_start') || field.includes('_end');
-    const isNumberField = ['paper_fields', 'eliminated', 'automated', 'controlled', 'remaining', 'interlocks', 'compliance_score'].includes(field);
-    const isStatusField = field === 'status';
-    const isBatchStatusField = field.includes('batch') && field.includes('status');
-    const isApproverField = field === 'uat_approver_id';
-
-    if (!canEdit) {
-      if (isStatusField || isBatchStatusField) {
-        return renderStatusPill(value, isStatusField ? STATUS_COLORS : BATCH_STATUS_COLORS);
-      }
-      if (isDateField) {
-        return value ? new Date(value).toLocaleDateString() : '-';
-      }
-      if (isApproverField) {
-        const person = people.find(p => p.id === value);
-        return person?.name || '-';
-      }
-      return value || '-';
-    }
-
-    if (isDateField) {
-      return (
-        <input
-          type="date"
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        />
-      );
-    }
-
-    if (isStatusField) {
-      return (
-        <select
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        >
-          <option value="">Select status</option>
-          {UAT_STATUS_OPTIONS.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      );
-    }
-
-    if (isBatchStatusField) {
-      return (
-        <select
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        >
-          <option value="">Select status</option>
-          {UAT_BATCH_STATUS_OPTIONS.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      );
-    }
-
-    if (isApproverField) {
-      return (
-        <select
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        >
-          <option value="">Select approver</option>
-          {people.map(person => (
-            <option key={person.id} value={person.id}>{person.name}</option>
-          ))}
-        </select>
-      );
-    }
-
-    if (isNumberField) {
-      return (
-        <input
-          type="number"
-          value={value || 0}
-          onChange={(e) => handleCellChange(itemId, field, parseInt(e.target.value) || 0)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        />
-      );
-    }
-
-    return (
-      <input
-        type="text"
-        value={value || ''}
-        onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-        className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-      />
-    );
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-8 p-6">
-      {isMESUAT && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">MES UAT Tracker</h3>
-
-          {/* Batch Date Configuration */}
-          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-            <h4 className="font-semibold mb-4">Batch Dates Configuration</h4>
-            <div className="grid grid-cols-6 gap-4">
-              {[1, 2, 3].map(batchNum => (
-                <div key={`batch_${batchNum}`} className="space-y-2">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Batch {batchNum} Start
-                    </label>
-                    <input
-                      type="date"
-                      value={batchDates[`batch_${batchNum}_start`] || ''}
-                      onChange={(e) => handleBatchDateChange(batchNum, 'start', e.target.value)}
-                      disabled={!canEdit}
-                      className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500 disabled:bg-gray-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Batch {batchNum} End
-                    </label>
-                    <input
-                      type="date"
-                      value={batchDates[`batch_${batchNum}_end`] || ''}
-                      onChange={(e) => handleBatchDateChange(batchNum, 'end', e.target.value)}
-                      disabled={!canEdit}
-                      className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500 disabled:bg-gray-100"
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* UAT Table */}
-          <div className="overflow-x-auto border border-gray-300 rounded-lg">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="bg-gray-100 border-b">
-                  <th className="px-4 py-2 text-left font-semibold border-r w-40">Process Name</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-32">Status</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-40">UAT Approver</th>
-                  <th colSpan="3" className="px-4 py-2 text-center font-semibold border-r">Batch 1</th>
-                  <th colSpan="3" className="px-4 py-2 text-center font-semibold border-r">Batch 2</th>
-                  <th colSpan="3" className="px-4 py-2 text-center font-semibold border-r">Batch 3</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-24">Paper Fields</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-20">Eliminated</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-20">Automated</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-20">Controlled</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-20">Remaining</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-20">Interlocks</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-28">Compliance Score</th>
-                  <th className="px-4 py-2 text-center font-semibold w-12">Actions</th>
-                </tr>
-                <tr className="bg-gray-50 border-b">
-                  <th colSpan="3" className="px-4 py-2"></th>
-                  <th className="px-4 py-2 text-center font-semibold border-r text-xs">Start</th>
-                  <th className="px-4 py-2 text-center font-semibold border-r text-xs">End</th>
-                  <th className="px-4 py-2 text-center font-semibold border-r text-xs">Status</th>
-                  <th className="px-4 py-2 text-center font-semibold border-r text-xs">Start</th>
-                  <th className="px-4 py-2 text-center font-semibold border-r text-xs">End</th>
-                  <th className="px-4 py-2 text-center font-semibold border-r text-xs">Status</th>
-                  <th className="px-4 py-2 text-center font-semibold border-r text-xs">Start</th>
-                  <th className="px-4 py-2 text-center font-semibold border-r text-xs">End</th>
-                  <th className="px-4 py-2 text-center font-semibold border-r text-xs">Status</th>
-                  <th colSpan="7"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {['BMR', 'BPR', 'Logbooks / Processes'].map(groupName => (
-                  <React.Fragment key={groupName}>
-                    {/* Group Header */}
-                    <tr className="bg-gray-100 border-b">
-                      <td colSpan="20" className="px-4 py-2 font-bold">{groupName}</td>
-                    </tr>
-                    {/* Group Rows */}
-                    {groupedItems[groupName]?.map((item, idx) => (
-                      <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'process_name', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'status', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'uat_approver_id', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'batch_1_start', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'batch_1_end', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'batch_1_status', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'batch_2_start', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'batch_2_end', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'batch_2_status', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'batch_3_start', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'batch_3_end', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'batch_3_status', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'paper_fields', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'eliminated', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'automated', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'controlled', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'remaining', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'interlocks', item.id)}</td>
-                        <td className="px-4 py-2 border-r">{renderCell(item, 'compliance_score', item.id)}</td>
-                        <td className="px-4 py-2 text-center">
-                          {canDeleteRows && (
-                            <button
-                              onClick={() => handleDeleteRow(item.id)}
-                              className="text-red-500 hover:text-red-700"
-                              title="Delete row"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                    {/* Add Row Button */}
-                    <tr className="bg-gray-50 border-b">
-                      <td colSpan="20" className="px-4 py-2">
-                        {canEdit && (
-                          <button
-                            onClick={() => handleAddRow(groupName)}
-                            className="flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
-                          >
-                            <Plus size={16} /> Add Row
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {isLogbooksUAT && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Logbooks UAT Tracker</h3>
-
-          <div className="overflow-x-auto border border-gray-300 rounded-lg">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="bg-gray-100 border-b">
-                  <th className="px-4 py-2 text-left font-semibold border-r w-40">Process Name</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-32">Status</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-40">UAT Approver</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-24">Paper Fields</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-20">Eliminated</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-20">Automated</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-20">Controlled</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-20">Remaining</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-20">Interlocks</th>
-                  <th className="px-4 py-2 text-left font-semibold border-r w-28">Compliance Score</th>
-                  <th className="px-4 py-2 text-center font-semibold w-12">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {/* Group Header */}
-                <tr className="bg-gray-100 border-b">
-                  <td colSpan="11" className="px-4 py-2 font-bold">Logbooks / Processes</td>
-                </tr>
-                {/* Rows */}
-                {groupedItems['Logbooks / Processes']?.map((item, idx) => (
-                  <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className="px-4 py-2 border-r">{renderCell(item, 'process_name', item.id)}</td>
-                    <td className="px-4 py-2 border-r">{renderCell(item, 'status', item.id)}</td>
-                    <td className="px-4 py-2 border-r">{renderCell(item, 'uat_approver_id', item.id)}</td>
-                    <td className="px-4 py-2 border-r">{renderCell(item, 'paper_fields', item.id)}</td>
-                    <td className="px-4 py-2 border-r">{renderCell(item, 'eliminated', item.id)}</td>
-                    <td className="px-4 py-2 border-r">{renderCell(item, 'automated', item.id)}</td>
-                    <td className="px-4 py-2 border-r">{renderCell(item, 'controlled', item.id)}</td>
-                    <td className="px-4 py-2 border-r">{renderCell(item, 'remaining', item.id)}</td>
-                    <td className="px-4 py-2 border-r">{renderCell(item, 'interlocks', item.id)}</td>
-                    <td className="px-4 py-2 border-r">{renderCell(item, 'compliance_score', item.id)}</td>
-                    <td className="px-4 py-2 text-center">
-                      {canDeleteRows && (
-                        <button
-                          onClick={() => handleDeleteRow(item.id)}
-                          className="text-red-500 hover:text-red-700"
-                          title="Delete row"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {/* Add Row Button */}
-                <tr className="bg-gray-50 border-b">
-                  <td colSpan="11" className="px-4 py-2">
-                    {canEdit && (
-                      <button
-                        onClick={() => handleAddRow('Logbooks / Processes')}
-                        className="flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
-                      >
-                        <Plus size={16} /> Add Row
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+  if (!isMES && !isLogbooks) return (
+    <div className="p-6 text-gray-500 text-sm">
+      UAT tracker not configured for this project type. Set <code>uat_type</code> to <code>mes</code> or <code>logbooks</code>.
     </div>
   );
-};
 
-export default UATTab;
+  // ── Column definitions ───────────────────────────────────────────────────────
+  // MES: process | status | approver | B1 | B2 | B3 | paper | elim | auto | ctrl | rem | inter | comp
+  // LOG: process | status | approver | paper | elim | auto | ctrl | rem | inter | comp
+
+  const thCls = 'px-2 py-1.5 text-center font-semibold text-[10px] text-gray-700 border-r border-gray-300';
+  const tdCls = 'px-2 py-1 border-r border-gray-200 text-xs';
+  const superTh = 'px-2 py-1 text-center text-xs font-bold border-r border-gray-300 bg-gray-200';
+
+  return (
+    <div className="p-6 space-y-4">
+      <h3 className="text-lg font-semibold">{isMES ? 'MES' : 'Logbooks'} UAT Tracker</h3>
+
+      <div className="overflow-x-auto border border-gray-300 rounded-lg">
+        <table className="border-collapse text-xs w-full">
+          <thead>
+            {/* ── Super-header row ── */}
+            <tr className="bg-gray-200 border-b border-gray-300">
+              <th className={`${superTh} w-8`} />
+              <th colSpan={3} className={`${superTh} text-left`}>Configuration</th>
+              {isMES && <th colSpan={3} className={superTh}>UAT</th>}
+              <th colSpan={7} className={superTh}>Case Study</th>
+            </tr>
+
+            {/* ── Column headers ── */}
+            <tr className="bg-gray-100 border-b border-gray-300">
+              <th className={`${thCls} w-8`} />
+              <th className={`${thCls} text-left w-40`}>Process Name</th>
+              <th className={`${thCls} w-28`}>Status</th>
+              <th className={`${thCls} w-32`}>UAT Approver</th>
+              {isMES && <>
+                <th className={`${thCls} w-24`}>Batch 1</th>
+                <th className={`${thCls} w-24`}>Batch 2</th>
+                <th className={`${thCls} w-24`}>Batch 3</th>
+              </>}
+              <th className={`${thCls} w-20`}>Paper Fields</th>
+              <th className={`${thCls} w-20`}>Eliminated</th>
+              <th className={`${thCls} w-20`}>Automated</th>
+              <th className={`${thCls} w-20`}>Controlled</th>
+              <th className={`${thCls} w-20`}>Remaining</th>
+              <th className={`${thCls} w-20`}>Interlocks</th>
+              <th className="px-2 py-1.5 text-center font-semibold text-[10px] text-gray-700 w-24">Compliance Score</th>
+            </tr>
+
+            {/* ── Batch date rows (MES only) ── */}
+            {isMES && <>
+              <tr className="bg-blue-50 border-b border-gray-200">
+                <td className={`${tdCls} text-gray-500 font-medium`} />
+                <td className={`${tdCls} font-medium text-gray-600`} colSpan={3}>Start Date</td>
+                {[1,2,3].map(n => (
+                  <td key={n} className={tdCls}>
+                    <input type="date" value={batchDates[`batch_${n}_start`] || ''} disabled={!canEdit}
+                      onChange={e => handleBatchDateChange(`batch_${n}_start`, e.target.value)}
+                      className="w-full px-1 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
+                  </td>
+                ))}
+                <td colSpan={7} />
+              </tr>
+              <tr className="bg-blue-50 border-b border-gray-300">
+                <td className={tdCls} />
+                <td className={`${tdCls} font-medium text-gray-600`} colSpan={3}>End Date</td>
+                {[1,2,3].map(n => (
+                  <td key={n} className={tdCls}>
+                    <input type="date" value={batchDates[`batch_${n}_end`] || ''} disabled={!canEdit}
+                      onChange={e => handleBatchDateChange(`batch_${n}_end`, e.target.value)}
+                      className="w-full px-1 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
+                  </td>
+                ))}
+                <td colSpan={7} />
+              </tr>
+            </>}
+          </thead>
+
+          <tbody>
+            {groups.map(groupName => (
+              <React.Fragment key={groupName}>
+                {/* Group header */}
+                <tr className="bg-gray-100 border-b border-gray-300">
+                  <td colSpan={isMES ? 14 : 11} className="px-3 py-1.5 font-bold text-xs text-gray-800">{groupName}</td>
+                </tr>
+
+                {/* Data rows */}
+                {groupedItems[groupName]?.map((item, idx) => (
+                  <tr key={item.id} className={idx % 2 === 0 ? 'bg-white border-b' : 'bg-gray-50 border-b'}>
+                    {/* Three-dots menu */}
+                    <td className="px-1 py-1 border-r border-gray-200 w-8">
+                      <div className="relative flex items-center justify-center">
+                        <button onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === item.id ? null : item.id); }}
+                          className="p-0.5 hover:bg-gray-200 rounded">
+                          <MoreVertical size={12} className="text-gray-400" />
+                        </button>
+                        {openMenuId === item.id && canDelete && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setOpenMenuId(null)} />
+                            <div className="absolute left-6 top-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 w-20">
+                              <button onClick={() => { setOpenMenuId(null); handleDeleteRow(item.id); }}
+                                className="flex items-center gap-1.5 w-full px-2 py-1 text-xs text-red-600 hover:bg-red-50">
+                                <Trash2 size={10} /> Delete
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Process Name */}
+                    <td className={tdCls}>
+                      <TextCell value={item.process_name} disabled={!canEdit} placeholder="Process name…"
+                        onChange={v => handleChange(item.id, 'process_name', v)} />
+                    </td>
+
+                    {/* Status */}
+                    <td className={tdCls}>
+                      {canEdit
+                        ? <ColoredSelect value={item.status} options={UAT_STATUS_OPTIONS} colorMap={STATUS_COLORS}
+                            onChange={v => handleChange(item.id, 'status', v)} />
+                        : <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_COLORS[item.status] || 'bg-gray-100 text-gray-600'}`}>{item.status || '—'}</span>
+                      }
+                    </td>
+
+                    {/* UAT Approver */}
+                    <td className={tdCls}>
+                      {canEdit
+                        ? <select value={item.uat_approver_id || ''} onChange={e => handleChange(item.id, 'uat_approver_id', e.target.value)}
+                            className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs bg-white focus:outline-none focus:border-blue-400">
+                            <option value="">—</option>
+                            {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                        : people.find(p => p.id === item.uat_approver_id)?.name || '—'
+                      }
+                    </td>
+
+                    {/* Batch statuses (MES only) */}
+                    {isMES && [1,2,3].map(n => (
+                      <td key={n} className={tdCls}>
+                        {canEdit
+                          ? <ColoredSelect value={item[`batch_${n}_status`]} options={UAT_BATCH_STATUS_OPTIONS}
+                              colorMap={BATCH_STATUS_COLORS} onChange={v => handleChange(item.id, `batch_${n}_status`, v)} />
+                          : <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${BATCH_STATUS_COLORS[item[`batch_${n}_status`]] || ''}`}>{item[`batch_${n}_status`] || '—'}</span>
+                        }
+                      </td>
+                    ))}
+
+                    {/* Numeric fields */}
+                    {['paper_fields','eliminated','automated','controlled','remaining','interlocks','compliance_score'].map(f => (
+                      <td key={f} className={`${tdCls} text-right`}>
+                        <NumCell value={item[f]} disabled={!canEdit} onChange={v => handleChange(item.id, f, v)} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+
+                {/* Add Row */}
+                {canEdit && (
+                  <tr className="bg-gray-50 border-b">
+                    <td colSpan={isMES ? 14 : 11} className="px-3 py-1.5">
+                      <button onClick={() => handleAddRow(groupName)}
+                        className="flex items-center gap-1.5 text-blue-600 hover:text-blue-800 text-xs font-medium">
+                        <Plus size={13} /> Add Row
+                      </button>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
