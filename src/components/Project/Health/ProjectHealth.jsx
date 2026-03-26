@@ -149,8 +149,17 @@ export default function ProjectHealth({ project, canEdit }) {
     ? Math.max(0, networkdays(parseDate(releaseTask.baseline_planned_end), parseDate(releaseTask.planned_end)) - 1)
     : null;
 
-  // SOW — use projectedOnboardingDays (dynamic) as denominator; fall back to targetDays
-  const sowCompletion = calcSOWCompletion(tasks, projectedOnboardingDays || targetDays);
+  // SOW denominator: first task planned_start → projected go-live (consistent with elapsed days start)
+  // This ensures numerator (elapsed from first task) and denominator share the same reference point.
+  const firstTaskDate = tasks.length > 0
+    ? new Date(Math.min(...tasks.filter(t => t.planned_start).map(t => parseDate(t.planned_start).getTime())))
+    : null;
+  const sowDenominator = projectedGoLive && firstTaskDate
+    ? networkdays(firstTaskDate, new Date(projectedGoLive))
+    : projectedOnboardingDays || targetDays;
+
+  // SOW — use sowDenominator (first task → go-live) so elapsed and denominator share the same start
+  const sowCompletion = calcSOWCompletion(tasks, sowDenominator);
   const currentSOW    = sowCompletion?.current  ?? 0;
   const expectedSOW   = sowCompletion?.expected ?? 0;
   const sowDelta      = currentSOW - expectedSOW;
@@ -323,7 +332,7 @@ export default function ProjectHealth({ project, canEdit }) {
           <div>
             <h3 className="text-sm font-semibold text-slate-700">Projected SOW Completion %</h3>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              Denominator: {projectedOnboardingDays ? `${projectedOnboardingDays}d` : `${targetDays}d`} projected days
+              Denominator: {sowDenominator ? `${sowDenominator}d` : `${targetDays}d`} projected days (first task → go-live)
             </p>
           </div>
           <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 border ${
