@@ -94,16 +94,16 @@ export function calculateTask(task, allTasks) {
   const todayDate = today();
   let result = { ...task };
 
-  // 1. Planned Start (if not locked)
-  if (!task.planned_start_locked) {
+  // 1. Planned Start cascade — Not Started tasks only
+  // In Progress / Done tasks keep their locked planned_start from the DB
+  if (task.status === 'Not Started' && !task.planned_start_locked) {
     const ps = calcPlannedStart(task, allTasks);
-    if (ps) {
-      result.planned_start = toDateStr(ps);
-    }
+    if (ps) result.planned_start = toDateStr(ps);
   }
 
-  // 2. Planned End = WORKDAY(planned_start, duration - 1)
-  if (result.planned_start && result.duration) {
+  // 2. Planned End = WORKDAY(planned_start, duration - 1) — Not Started tasks only
+  // All other statuses keep their planned_end exactly as stored in the DB
+  if (task.status === 'Not Started' && result.planned_start && result.duration) {
     const pe = calcPlannedEnd(parseDate(result.planned_start), result.duration);
     if (pe) result.planned_end = toDateStr(pe);
   }
