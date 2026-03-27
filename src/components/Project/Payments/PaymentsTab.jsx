@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { MoreVertical, Plus, Download, Trash2 } from 'lucide-react';
+import { MoreVertical, Plus, Download, Trash2, GripVertical } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getPayments, upsertPayment, deletePayment, getPlanTasks } from '../../../lib/supabase';
-import { PAYMENTS_TEMPLATE, PAYMENT_STATUS_OPTIONS, PAYMENT_TYPE_OPTIONS, CURRENCY_OPTIONS } from '../../../lib/templates';
-import { formatDate } from '../../../lib/workdays';
+import { getPayments, upsertPayment, deletePayment } from '../../../lib/supabase';
+import { PAYMENT_STATUS_OPTIONS, PAYMENT_TYPE_OPTIONS, CURRENCY_OPTIONS } from '../../../lib/templates';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useSpreadsheet } from '../../../lib/useSpreadsheet';
 import { SCell } from '../../shared/SCell';
@@ -28,8 +27,20 @@ const StatusPill = ({ value, colorMap }) => {
   return <span className={`px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{value || '—'}</span>;
 };
 
-// Editable column keys for Tab/Enter navigation
-const EDIT_COLS = ['line_item','milestone','type','amount','currency','milestone_status','planned_date','invoice_id','payment_status','pending_amount'];
+// All editable columns (canonical definition)
+const ALL_COLS = [
+  { key: 'line_item',        label: 'Line Item',           defaultW: 160 },
+  { key: 'milestone',        label: 'Milestone',            defaultW: 140 },
+  { key: 'type',             label: 'Type',                 defaultW: 130 },
+  { key: 'amount',           label: 'Amount',               defaultW: 90,  right: true },
+  { key: 'currency',         label: 'Currency',             defaultW: 70 },
+  { key: 'milestone_status', label: 'Milestone Status',     defaultW: 110 },
+  { key: 'planned_date',     label: 'Planned Completion',   defaultW: 130 },
+  { key: 'invoice_id',       label: 'Invoice ID',           defaultW: 100 },
+  { key: 'payment_status',   label: 'Payment Status',       defaultW: 120 },
+  { key: 'pending_amount',   label: 'Pending Amount',       defaultW: 110, right: true },
+];
+const ALL_COL_KEYS = ALL_COLS.map(c => c.key);
 
 const PaymentsTab = ({ project, canEdit }) => {
   const { user, isAdmin, isDM } = useAuth();
@@ -38,15 +49,14 @@ const PaymentsTab = ({ project, canEdit }) => {
   const [openMenuId, setOpenMenuId] = useState(null);
   const ss = useSpreadsheet();
 
-  // Column widths (resizable)
-  const LS_KEY = `payCols_${project?.id}`;
-  const DEFAULT_COLS = { actions: 36, line_item: 160, milestone: 140, type: 130, amount: 90, currency: 70, milestone_status: 110, planned_date: 130, invoice_id: 100, payment_status: 120, pending_amount: 110 };
+  // ── Column widths (resizable) ──────────────────────────────────────────────
+  const LS_WIDTHS_KEY = `payCols_${project?.id}`;
+  const DEFAULT_WIDTHS = Object.fromEntries(ALL_COLS.map(c => [c.key, c.defaultW]));
   const [colWidths, setColWidths] = useState(() => {
-    try { const s = localStorage.getItem(LS_KEY); return s ? { ...DEFAULT_COLS, ...JSON.parse(s) } : { ...DEFAULT_COLS }; } catch { return { ...DEFAULT_COLS }; }
+    try { const s = localStorage.getItem(LS_WIDTHS_KEY); return s ? { ...DEFAULT_WIDTHS, ...JSON.parse(s) } : { ...DEFAULT_WIDTHS }; } catch { return { ...DEFAULT_WIDTHS }; }
   });
   const resizingRef = useRef(null);
-
-  useEffect(() => { try { localStorage.setItem(LS_KEY, JSON.stringify(colWidths)); } catch {} }, [colWidths]);
+  useEffect(() => { try { localStorage.setItem(LS_WIDTHS_KEY, JSON.stringify(colWidths)); } catch {} }, [colWidths]);
 
   useEffect(() => {
     const onMove = e => { if (!resizingRef.current) return; const { key, startX, startW } = resizingRef.current; setColWidths(p => ({ ...p, [key]: Math.max(50, startW + (e.clientX - startX)) })); };
@@ -56,8 +66,77 @@ const PaymentsTab = ({ project, canEdit }) => {
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, []);
 
+  // ── Column order (draggable) ───────────────────────────────────────────────
+  const LS_ORDER_KEY = `payColOrder_${project?.id}`;
+  const [colOrder, setColOrder] = useState(() => {
+    try { const s = localStorage.getItem(LS_ORDER_KEY); if (s) { const parsed = JSON.parse(s); if (Array.isArray(parsed) && parsed.length === ALL_COL_KEYS.length) return parsed; } } catch {}
+    return [...ALL_COL_KEYS];
+  });
+  useEffect(() => { try { localStorage.setItem(LS_ORDER_KEY, JSON.stringify(colOrder)); } catch {} }, [colOrder]);
+
+  const dragColRef = useRef(null);
+  const [dragColOver, setDragColOver] = useState(null);
+
+  const handleColDragStart = (key) => { dragColRef.current = key; };
+  const handleColDragOver = (e, key) => { e.preventDefault(); setDragColOver(key); };
+  const handleColDrop = (targetKey) => {
+    const from = dragColRef.current;
+    if (!from || from === targetKey) { dragColRef.current = null; setDragColOver(null); return; }
+    setColOrder(prev => {
+      const arr = [...prev];
+      const fi = arr.indexOf(from), ti = arr.indexOf(targetKey);
+      arr.splice(fi, 1); arr.splice(ti, 0, from);
+      return arr;
+    });
+    dragColRef.current = null;
+    setDragColOver(null);
+  };
+
+  // ── Row drag-and-drop ──────────────────────────────────────────────────────
+  const [dragRowIdx, setDragRowIdx] = useState(null);
+  const [dragRowOver, setDragRowOver] = useState(null);
+  const dragRowNodeRef = useRef(null);
+
+  const handleRowDragStart = useCallback((e, idx) => {
+    dragRowNodeRef.current = idx;
+    setDragRowIdx(idx);
+    e.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handleRowDragOver = useCallback((e, idx) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragRowOver(idx);
+  }, []);
+
+  const handleRowDrop = useCallback(async (e, dropIdx) => {
+    e.preventDefault();
+    const fromIdx = dragRowNodeRef.current;
+    setDragRowIdx(null);
+    setDragRowOver(null);
+    dragRowNodeRef.current = null;
+    if (fromIdx === null || fromIdx === dropIdx) return;
+    setPayments(prev => {
+      const arr = [...prev];
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(dropIdx, 0, moved);
+      const withOrder = arr.map((p, i) => ({ ...p, sort_order: i }));
+      // Persist sort_order updates
+      withOrder.forEach(p => { upsertPayment(p).catch(() => {}); });
+      return withOrder;
+    });
+  }, []);
+
+  const handleRowDragEnd = useCallback(() => {
+    setDragRowIdx(null);
+    setDragRowOver(null);
+    dragRowNodeRef.current = null;
+  }, []);
+
+  // ── Auth ───────────────────────────────────────────────────────────────────
   const canDeleteRows = isAdmin() || (isDM() && project?.dm_id === user?.id);
 
+  // ── Load ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -77,6 +156,7 @@ const PaymentsTab = ({ project, canEdit }) => {
     return () => document.removeEventListener('click', h);
   }, [openMenuId]);
 
+  // ── Save (debounced per-row) ───────────────────────────────────────────────
   const debouncedSave = useCallback(
     (() => {
       const timers = {};
@@ -96,13 +176,10 @@ const PaymentsTab = ({ project, canEdit }) => {
       const updated = prev.map(item => {
         if (item.id !== itemId) return item;
         let next = { ...item, [field]: value };
-        // Invoice Sent → zero out pending
         if (field === 'payment_status' && value === 'Invoice Sent') next.pending_milestone_amount = 0;
-        // Not Paid / Project Pending → restore pending to amount
         if (field === 'payment_status' && (value === 'Not Paid' || value === 'Project Pending')) {
           next.pending_milestone_amount = parseFloat(next.amount) || 0;
         }
-        // Changing amount while not invoiced → mirror to pending
         if (field === 'amount') {
           const shouldMirror = item.payment_status !== 'Invoice Sent' && item.payment_status !== 'Paid';
           if (shouldMirror) next.pending_milestone_amount = parseFloat(value) || 0;
@@ -122,10 +199,11 @@ const PaymentsTab = ({ project, canEdit }) => {
       amount: 0, currency: 'USD', milestone_status: 'Not Started',
       planned_milestone_completion_date: null,
       invoice_id: '', payment_status: 'Not Paid', pending_milestone_amount: 0,
+      sort_order: payments.length,
     };
     setPayments(prev => [...prev, newItem]);
     debouncedSave(newItem);
-  }, [project.id, debouncedSave]);
+  }, [project.id, debouncedSave, payments.length]);
 
   const handleDeleteRow = useCallback(async (itemId) => {
     try {
@@ -143,11 +221,44 @@ const PaymentsTab = ({ project, canEdit }) => {
     toast.success('Exported');
   }, [payments, project.id]);
 
+  // ── Helpers ────────────────────────────────────────────────────────────────
   const ResizeHandle = ({ colKey }) => (
     <div className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 z-10"
       onMouseDown={e => { e.preventDefault(); e.stopPropagation(); resizingRef.current = { key: colKey, startX: e.clientX, startW: colWidths[colKey] }; }} />
   );
   const cw = k => ({ width: colWidths[k], minWidth: colWidths[k] });
+
+  // Ordered column definitions
+  const orderedCols = colOrder.map(k => ALL_COLS.find(c => c.key === k)).filter(Boolean);
+  const EDIT_COLS = colOrder;
+
+  // Render a cell by column key
+  const renderCell = (item, colKey) => {
+    switch (colKey) {
+      case 'line_item':
+        return <SCell key={colKey} ss={ss} rowId={item.id} colKey="line_item" value={item.line_item} onChange={v => handleChange(item.id,'line_item',v)} rows={payments} cols={EDIT_COLS} disabled={!canEdit} tdStyle={cw('line_item')} />;
+      case 'milestone':
+        return <SCell key={colKey} ss={ss} rowId={item.id} colKey="milestone" value={item.milestone} onChange={v => handleChange(item.id,'milestone',v)} rows={payments} cols={EDIT_COLS} disabled={!canEdit} tdStyle={cw('milestone')} />;
+      case 'type':
+        return <SCell key={colKey} ss={ss} rowId={item.id} colKey="type" value={item.type} onChange={v => handleChange(item.id,'type',v)} rows={payments} cols={EDIT_COLS} type="select" options={PAYMENT_TYPE_OPTIONS} disabled={!canEdit} tdStyle={cw('type')} />;
+      case 'amount':
+        return <SCell key={colKey} ss={ss} rowId={item.id} colKey="amount" value={String(item.amount ?? 0)} onChange={v => handleChange(item.id,'amount',v)} rows={payments} cols={EDIT_COLS} type="number" disabled={!canEdit} tdStyle={cw('amount')} readView={<span className="ml-auto">{item.amount ?? '—'}</span>} tdClass="text-right" />;
+      case 'currency':
+        return <SCell key={colKey} ss={ss} rowId={item.id} colKey="currency" value={item.currency} onChange={v => handleChange(item.id,'currency',v)} rows={payments} cols={EDIT_COLS} type="select" options={CURRENCY_OPTIONS} disabled={!canEdit} tdStyle={cw('currency')} />;
+      case 'milestone_status':
+        return <SCell key={colKey} ss={ss} rowId={item.id} colKey="milestone_status" value={item.milestone_status} onChange={v => handleChange(item.id,'milestone_status',v)} rows={payments} cols={EDIT_COLS} type="colored-select" options={['Not Started','In Progress','Done','Blocked']} colorMap={MILESTONE_STATUS_COLORS} disabled={!canEdit} tdStyle={cw('milestone_status')} readView={<StatusPill value={item.milestone_status} colorMap={MILESTONE_STATUS_COLORS} />} />;
+      case 'planned_date':
+        return <SCell key={colKey} ss={ss} rowId={item.id} colKey="planned_date" value={item.planned_milestone_completion_date || ''} onChange={v => handleChange(item.id,'planned_milestone_completion_date',v)} rows={payments} cols={EDIT_COLS} type="date" disabled={!canEdit} tdStyle={cw('planned_date')} readView={<span>{item.planned_milestone_completion_date ? new Date(item.planned_milestone_completion_date).toLocaleDateString() : '—'}</span>} />;
+      case 'invoice_id':
+        return <SCell key={colKey} ss={ss} rowId={item.id} colKey="invoice_id" value={item.invoice_id} onChange={v => handleChange(item.id,'invoice_id',v)} rows={payments} cols={EDIT_COLS} disabled={!canEdit} tdStyle={cw('invoice_id')} />;
+      case 'payment_status':
+        return <SCell key={colKey} ss={ss} rowId={item.id} colKey="payment_status" value={item.payment_status} onChange={v => handleChange(item.id,'payment_status',v)} rows={payments} cols={EDIT_COLS} type="colored-select" options={PAYMENT_STATUS_OPTIONS} colorMap={PAYMENT_STATUS_COLORS} disabled={!canEdit} tdStyle={cw('payment_status')} readView={<StatusPill value={item.payment_status} colorMap={PAYMENT_STATUS_COLORS} />} />;
+      case 'pending_amount':
+        return <SCell key={colKey} ss={ss} rowId={item.id} colKey="pending_amount" value={String(item.pending_milestone_amount ?? 0)} onChange={v => handleChange(item.id,'pending_milestone_amount',v)} rows={payments} cols={EDIT_COLS} type="number" disabled={!canEdit} tdStyle={cw('pending_amount')} readView={<span className="ml-auto">{item.pending_milestone_amount ?? '—'}</span>} tdClass="text-right" />;
+      default:
+        return <td key={colKey} />;
+    }
+  };
 
   if (loading) return <div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" /></div>;
 
@@ -165,20 +276,21 @@ const PaymentsTab = ({ project, canEdit }) => {
         <table className="border-collapse text-xs" style={{ minWidth: '100%' }}>
           <thead>
             <tr className="bg-gray-100 border-b">
-              <th className="relative border-r" style={cw('actions')} />
-              {[
-                { key:'line_item',      label:'Line Item' },
-                { key:'milestone',      label:'Milestone' },
-                { key:'type',           label:'Type' },
-                { key:'amount',         label:'Amount',         right:true },
-                { key:'currency',       label:'Currency' },
-                { key:'milestone_status', label:'Milestone Status' },
-                { key:'planned_date',   label:'Planned Completion' },
-                { key:'invoice_id',     label:'Invoice ID' },
-                { key:'payment_status', label:'Payment Status' },
-                { key:'pending_amount', label:'Pending Amount',  right:true },
-              ].map(({ key, label, right }) => (
-                <th key={key} className={`relative px-2 py-2 font-semibold border-r text-gray-700 ${right?'text-right':'text-left'}`} style={cw(key)}>
+              {/* Drag handle header */}
+              <th className="relative border-r" style={{ width: 28, minWidth: 28 }} />
+              {/* Actions header */}
+              <th className="relative border-r" style={{ width: 36, minWidth: 36 }} />
+              {orderedCols.map(({ key, label, right }) => (
+                <th
+                  key={key}
+                  className={`relative px-2 py-2 font-semibold border-r text-gray-700 cursor-grab select-none ${right ? 'text-right' : 'text-left'} ${dragColOver === key ? 'bg-blue-100' : ''}`}
+                  style={{ ...cw(key), userSelect: 'none' }}
+                  draggable
+                  onDragStart={() => handleColDragStart(key)}
+                  onDragOver={e => handleColDragOver(e, key)}
+                  onDrop={() => handleColDrop(key)}
+                  onDragEnd={() => setDragColOver(null)}
+                >
                   {label}
                   <ResizeHandle colKey={key} />
                 </th>
@@ -187,9 +299,26 @@ const PaymentsTab = ({ project, canEdit }) => {
           </thead>
           <tbody>
             {payments.map((item, idx) => (
-              <tr key={item.id} className={idx % 2 === 0 ? 'bg-white border-b' : 'bg-gray-50 border-b'}>
-                {/* Three-dots */}
-                <td className="border-r text-center" style={cw('actions')}>
+              <tr
+                key={item.id}
+                className={`border-b transition-opacity ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${dragRowIdx === idx ? 'opacity-40' : ''} ${dragRowOver === idx ? 'border-t-2 border-blue-400' : ''}`}
+                draggable={canEdit}
+                onDragStart={canEdit ? e => handleRowDragStart(e, idx) : undefined}
+                onDragOver={canEdit ? e => handleRowDragOver(e, idx) : undefined}
+                onDrop={canEdit ? e => handleRowDrop(e, idx) : undefined}
+                onDragEnd={canEdit ? handleRowDragEnd : undefined}
+              >
+                {/* Row drag handle */}
+                <td className="border-r text-center" style={{ width: 28, minWidth: 28 }}>
+                  {canEdit && (
+                    <span className="cursor-grab text-gray-300 hover:text-gray-500 flex items-center justify-center h-full py-1">
+                      <GripVertical size={14} />
+                    </span>
+                  )}
+                </td>
+
+                {/* Three-dots menu */}
+                <td className="border-r text-center" style={{ width: 36, minWidth: 36 }}>
                   <div className="relative flex items-center justify-center h-full">
                     <button onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === item.id ? null : item.id); }} className="p-1 hover:bg-gray-200 rounded transition">
                       <MoreVertical size={13} className="text-gray-400" />
@@ -203,45 +332,20 @@ const PaymentsTab = ({ project, canEdit }) => {
                   </div>
                 </td>
 
-                <SCell ss={ss} rowId={item.id} colKey="line_item"        value={item.line_item}   onChange={v => handleChange(item.id,'line_item',v)}   rows={payments} cols={EDIT_COLS} disabled={!canEdit} tdStyle={cw('line_item')} />
-                <SCell ss={ss} rowId={item.id} colKey="milestone"        value={item.milestone}   onChange={v => handleChange(item.id,'milestone',v)}   rows={payments} cols={EDIT_COLS} disabled={!canEdit} tdStyle={cw('milestone')} />
-
-                {/* Type — select */}
-                <SCell ss={ss} rowId={item.id} colKey="type" value={item.type} onChange={v => handleChange(item.id,'type',v)} rows={payments} cols={EDIT_COLS} type="select" options={PAYMENT_TYPE_OPTIONS} disabled={!canEdit} tdStyle={cw('type')} />
-
-                {/* Amount */}
-                <SCell ss={ss} rowId={item.id} colKey="amount" value={String(item.amount ?? 0)} onChange={v => handleChange(item.id,'amount',v)} rows={payments} cols={EDIT_COLS} type="number" disabled={!canEdit} tdStyle={cw('amount')}
-                  readView={<span className="ml-auto">{item.amount ?? '—'}</span>} tdClass="text-right" />
-
-                {/* Currency */}
-                <SCell ss={ss} rowId={item.id} colKey="currency" value={item.currency} onChange={v => handleChange(item.id,'currency',v)} rows={payments} cols={EDIT_COLS} type="select" options={CURRENCY_OPTIONS} disabled={!canEdit} tdStyle={cw('currency')} />
-
-                {/* Milestone Status */}
-                <SCell ss={ss} rowId={item.id} colKey="milestone_status" value={item.milestone_status} onChange={v => handleChange(item.id,'milestone_status',v)} rows={payments} cols={EDIT_COLS} type="colored-select" options={['Not Started','In Progress','Done','Blocked']} colorMap={MILESTONE_STATUS_COLORS} disabled={!canEdit} tdStyle={cw('milestone_status')}
-                  readView={<StatusPill value={item.milestone_status} colorMap={MILESTONE_STATUS_COLORS} />} />
-
-                {/* Planned Date */}
-                <SCell ss={ss} rowId={item.id} colKey="planned_date" value={item.planned_milestone_completion_date || ''} onChange={v => handleChange(item.id,'planned_milestone_completion_date',v)} rows={payments} cols={EDIT_COLS} type="date" disabled={!canEdit} tdStyle={cw('planned_date')}
-                  readView={<span>{item.planned_milestone_completion_date ? new Date(item.planned_milestone_completion_date).toLocaleDateString() : '—'}</span>} />
-
-                {/* Invoice ID */}
-                <SCell ss={ss} rowId={item.id} colKey="invoice_id" value={item.invoice_id} onChange={v => handleChange(item.id,'invoice_id',v)} rows={payments} cols={EDIT_COLS} disabled={!canEdit} tdStyle={cw('invoice_id')} />
-
-                {/* Payment Status */}
-                <SCell ss={ss} rowId={item.id} colKey="payment_status" value={item.payment_status} onChange={v => handleChange(item.id,'payment_status',v)} rows={payments} cols={EDIT_COLS} type="colored-select" options={PAYMENT_STATUS_OPTIONS} colorMap={PAYMENT_STATUS_COLORS} disabled={!canEdit} tdStyle={cw('payment_status')}
-                  readView={<StatusPill value={item.payment_status} colorMap={PAYMENT_STATUS_COLORS} />} />
-
-                {/* Pending Amount */}
-                <SCell ss={ss} rowId={item.id} colKey="pending_amount" value={String(item.pending_milestone_amount ?? 0)} onChange={v => handleChange(item.id,'pending_milestone_amount',v)} rows={payments} cols={EDIT_COLS} type="number" disabled={!canEdit} tdStyle={cw('pending_amount')}
-                  readView={<span className="ml-auto">{item.pending_milestone_amount ?? '—'}</span>} tdClass="text-right" />
+                {orderedCols.map(({ key }) => renderCell(item, key))}
               </tr>
             ))}
             {payments.length === 0 && (
-              <tr><td colSpan={11} className="px-4 py-8 text-center text-sm text-gray-500">No payment items yet. {canEdit && 'Click "Add Row" to create one.'}</td></tr>
+              <tr><td colSpan={orderedCols.length + 2} className="px-4 py-8 text-center text-sm text-gray-500">No payment items yet. {canEdit && 'Click "Add Row" to create one.'}</td></tr>
             )}
           </tbody>
         </table>
       </div>
+      {canEdit && (
+        <p className="text-xs text-gray-400 mt-1">
+          Drag the <GripVertical size={11} className="inline" /> handle to reorder rows · Drag column headers to reorder columns
+        </p>
+      )}
     </div>
   );
 };

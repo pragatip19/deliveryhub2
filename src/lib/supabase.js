@@ -580,7 +580,9 @@ export async function getRaidItems(projectId, type) {
 
 export async function upsertRaidItem(item) {
   // Strip 'description' — may not exist in the raid_items DB schema (PGRST204)
-  const { description: _desc, ...raidItem } = item;
+  // Convert empty-string date fields to null (PostgreSQL rejects "" for date columns — 22007)
+  const { description: _desc, due_date, ...rest } = item;
+  const raidItem = { ...rest, due_date: due_date || null };
   const { data, error } = await supabase.from('raid_items').upsert(raidItem).select().single();
   if (error) throw error;
   return data;

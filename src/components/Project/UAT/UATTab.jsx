@@ -207,7 +207,7 @@ export default function UATTab({ project, canEdit }) {
       status: 'Not Started',
       uat_approver_id: null,
       approver: '',
-      sort_order: Date.now(),
+      sort_order: uatItems.filter(i => i.group_name === groupName).length,
       ...(isMES && {
         batch_1_status: 'Not Started',
         batch_2_status: 'Not Started',

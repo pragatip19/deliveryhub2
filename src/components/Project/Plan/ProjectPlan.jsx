@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Eye, Download, Plus, Trash2, ArrowUpDown, MoreVertical,
   Undo2, Redo2, ArrowDownToLine, ArrowUpToLine, Bold, Copy, Clipboard, Edit2, GripVertical,
-  Lock, LockOpen, Link2, X,
+  Lock, LockOpen, Link2, X, CalendarDays,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import debounce from 'lodash.debounce';
@@ -870,9 +870,21 @@ const ProjectPlan = ({ project, canEdit }) => {
     }
     if (col.type === 'date') {
       const disp = val ? formatDate(typeof val === 'string' ? parseDate(val) : val) : null;
+      const canEditDate = isEditable(col, task);
       return (
-        <div {...clickProps} style={wrapStyle} className={`${textCls} cursor-pointer`}>
-          {disp || <span className="text-gray-300">—</span>}
+        <div
+          {...clickProps}
+          style={wrapStyle}
+          className={`group flex items-center gap-1 ${textCls} cursor-pointer`}
+        >
+          <span className="truncate">{disp || <span className="text-gray-300">—</span>}</span>
+          {canEditDate && (
+            <CalendarDays
+              size={11}
+              className="flex-shrink-0 text-gray-300 group-hover:text-blue-400 transition-colors cursor-pointer"
+              onClick={e => { e.stopPropagation(); handleCellDoubleClick(e, task.id, col.key, task); }}
+            />
+          )}
         </div>
       );
     }
@@ -954,7 +966,13 @@ const ProjectPlan = ({ project, canEdit }) => {
           if (idx >= 0 && idx < st.length - 1) setSelectedCell({ taskId: st[idx + 1].id, col: col.key });
         }
       };
-      return <input type="date" defaultValue={dv} onBlur={onDateBlur} onKeyDown={onDateEnter} className={cls} autoFocus />;
+      // Auto-open the native calendar picker so user doesn't need a 3rd click
+      const autoOpenPicker = (el) => {
+        if (!el) return;
+        el.focus();
+        try { el.showPicker?.(); } catch {}
+      };
+      return <input type="date" defaultValue={dv} ref={autoOpenPicker} onBlur={onDateBlur} onKeyDown={onDateEnter} className={cls} />;
     }
     // Number + text inputs: UNCONTROLLED (defaultValue) so that handleCellChange
     // is NOT called on every keystroke — prevents recalculation/re-render/scroll-jump
