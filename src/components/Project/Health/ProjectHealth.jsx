@@ -186,10 +186,11 @@ export default function ProjectHealth({ project, canEdit }) {
   const urgentTasks = useMemo(() =>
     tasks.filter(t => {
       if (t.status === 'Done' || t.status === 'Not Applicable') return false;
-      // days_delay is computed by recalculatePlan after load.
-      // For In Progress: delay = days past planned_end.
-      // For Not Started: delay = days past planned_end (cascade-adjusted via recalculatePlan).
-      return typeof t.days_delay === 'number' && t.days_delay > 10;
+      // Show any task with at least 1 day of delay so nothing slips through.
+      // days_delay is computed by recalculatePlan after load:
+      //   Not Started → days past baseline_planned_end (or planned_end)
+      //   In Progress → days past planned_end
+      return typeof t.days_delay === 'number' && t.days_delay > 0;
     }),
     [tasks]
   );
