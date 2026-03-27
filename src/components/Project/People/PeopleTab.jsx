@@ -1,15 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, MoreVertical, Trash2, Users, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getPeople, upsertPerson, deletePerson } from '../../../lib/supabase';
 import { useAuth } from '../../../contexts/AuthContext';
+import { useSpreadsheet } from '../../../lib/useSpreadsheet';
+import { SCell } from '../../shared/SCell';
 
 // ── People templates by category ──────────────────────────────────────────────
 const CLEEN_TEMPLATE = {
-  client: [
-    'Exec Sponsor', 'Validation Leader', 'IT Leader', 'Project Manager',
-    'UAT Approver', 'CV SME', 'IT SME', 'CSV SME',
-  ],
+  client:  ['Exec Sponsor', 'Validation Leader', 'IT Leader', 'Project Manager', 'UAT Approver', 'CV SME', 'IT SME', 'CSV SME'],
   leucine: ['Promise Owner', 'Delivery Manager', 'Solution Architect'],
 };
 
@@ -22,7 +21,6 @@ const MES_TEMPLATE = {
   leucine: ['Promise Owner', 'Delivery Manager', 'Solution Architect', 'Integration Team'],
 };
 
-// Placeholder names shown initially (from xlsx template format)
 function templatePlaceholder(team, role) {
   return `{${team} ${role}}`;
 }
@@ -32,23 +30,25 @@ function getTemplateForCategory(categoryName) {
   const n = categoryName.toLowerCase();
   if (n === 'cleen') return CLEEN_TEMPLATE;
   if (n.includes('mes') || n.includes('logbook') || n.includes('ai agent') || n.includes('lms') || n.includes('dms')) return MES_TEMPLATE;
-  return MES_TEMPLATE; // default to MES for unknown
+  return MES_TEMPLATE;
 }
 
 const EMPTY_PERSON = { name: '', email: '', role: '', phone: '', team: 'Client' };
 
+const EDIT_COLS = ['name', 'email', 'role', 'phone'];
+
 export default function PeopleTab({ project, canEdit }) {
   const { isAdmin, isDM } = useAuth();
-  const [clientPeople, setClientPeople]  = useState([]);
+  const [clientPeople, setClientPeople]   = useState([]);
   const [leucinePeople, setLeucinePeople] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]             = useState(true);
   const [loadingTemplate, setLoadingTemplate] = useState(false);
   const [addingClient, setAddingClient]   = useState(false);
   const [addingLeuine, setAddingLeuine]   = useState(false);
   const [newPerson, setNewPerson] = useState({ ...EMPTY_PERSON });
 
   const canManage = isAdmin() || (isDM() && canEdit);
-  const template = getTemplateForCategory(project?.category_name);
+  const template  = getTemplateForCategory(project?.category_name);
 
   useEffect(() => { loadPeople(); }, [project.id]);
 
@@ -66,7 +66,7 @@ export default function PeopleTab({ project, canEdit }) {
   async function savePersonField(person, field, value) {
     try {
       const updated = { ...person, [field]: value, project_id: project.id };
-      const saved = await upsertPerson(updated);
+      const saved   = await upsertPerson(updated);
       if (person.team === 'Client') {
         setClientPeople(prev => prev.map(p => p.id === saved.id ? saved : p));
       } else {
@@ -106,10 +106,8 @@ export default function PeopleTab({ project, canEdit }) {
   async function loadTemplate() {
     if (!template) return;
 
-    // Check which roles already exist (by role+team) to prevent duplicates
     const existingClientRoles = new Set(clientPeople.map(p => p.role));
     const existingLeuRoles    = new Set(leucinePeople.map(p => p.role));
-
     const newClientRoles  = template.client.filter(role => !existingClientRoles.has(role));
     const newLeuRoles     = template.leucine.filter(role => !existingLeuRoles.has(role));
 
@@ -125,39 +123,26 @@ export default function PeopleTab({ project, canEdit }) {
     setLoadingTemplate(true);
     try {
       const clientRows = newClientRoles.map(role => ({
-        name:       templatePlaceholder('Client', role),
-        role,
-        email:      '',
-        phone:      '',
-        team:       'Client',
-        project_id: project.id,
+        name: templatePlaceholder('Client', role), role, email: '', phone: '', team: 'Client', project_id: project.id,
       }));
       const leucineRows = newLeuRoles.map(role => ({
-        name:       templatePlaceholder('Leucine', role),
-        role,
-        email:      '',
-        phone:      '',
-        team:       'Leucine',
-        project_id: project.id,
+        name: templatePlaceholder('Leucine', role), role, email: '', phone: '', team: 'Leucine', project_id: project.id,
       }));
-
       const saved = await Promise.all([...clientRows, ...leucineRows].map(r => upsertPerson(r)));
-      const savedClient  = saved.filter(p => p.team === 'Client');
-      const savedLeuine  = saved.filter(p => p.team === 'Leucine');
-      setClientPeople(prev => [...prev, ...savedClient]);
-      setLeucinePeople(prev => [...prev, ...savedLeuine]);
-      toast.success(`Template loaded — ${savedClient.length} client + ${savedLeuine.length} Leucine roles added`);
+      setClientPeople(prev => [...prev, ...saved.filter(p => p.team === 'Client')]);
+      setLeucinePeople(prev => [...prev, ...saved.filter(p => p.team === 'Leucine')]);
+      toast.success(`Template loaded`);
     } catch (e) {
       toast.error('Failed to load template: ' + (e?.message || 'Unknown error'));
     }
     setLoadingTemplate(false);
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"/></div>;
+  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="p-6 space-y-8">
-      {/* Template banner — shown when people list is empty */}
+      {/* Template banner */}
       {canManage && template && (clientPeople.length === 0 && leucinePeople.length === 0) && (
         <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
           <div className="flex items-center gap-2">
@@ -169,24 +154,17 @@ export default function PeopleTab({ project, canEdit }) {
               </p>
             </div>
           </div>
-          <button
-            onClick={loadTemplate}
-            disabled={loadingTemplate}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition disabled:opacity-50"
-          >
+          <button onClick={loadTemplate} disabled={loadingTemplate}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition disabled:opacity-50">
             {loadingTemplate ? 'Loading…' : 'Load Template'}
           </button>
         </div>
       )}
 
-      {/* Load template button — shown when people already exist */}
       {canManage && template && (clientPeople.length > 0 || leucinePeople.length > 0) && (
         <div className="flex justify-end">
-          <button
-            onClick={loadTemplate}
-            disabled={loadingTemplate}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-medium rounded-lg border border-gray-200 transition disabled:opacity-50"
-          >
+          <button onClick={loadTemplate} disabled={loadingTemplate}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-medium rounded-lg border border-gray-200 transition disabled:opacity-50">
             <FileText className="w-3.5 h-3.5" />
             {loadingTemplate ? 'Loading…' : 'Load Template Roles'}
           </button>
@@ -194,32 +172,22 @@ export default function PeopleTab({ project, canEdit }) {
       )}
 
       <PeopleGroup
-        title="Client Team"
-        people={clientPeople}
-        team="Client"
-        canManage={canManage}
-        adding={addingClient}
-        newPerson={newPerson}
-        setNewPerson={setNewPerson}
+        title="Client Team" people={clientPeople} team="Client"
+        canManage={canManage} adding={addingClient}
+        newPerson={newPerson} setNewPerson={setNewPerson}
         onAdd={() => setAddingClient(true)}
         onSave={() => addPerson('Client')}
         onCancel={() => { setAddingClient(false); setNewPerson({ ...EMPTY_PERSON }); }}
-        onFieldChange={savePersonField}
-        onDelete={removePerson}
+        onFieldChange={savePersonField} onDelete={removePerson}
       />
       <PeopleGroup
-        title="Leucine Team"
-        people={leucinePeople}
-        team="Leucine"
-        canManage={canManage}
-        adding={addingLeuine}
-        newPerson={{ ...newPerson, team: 'Leucine' }}
-        setNewPerson={setNewPerson}
+        title="Leucine Team" people={leucinePeople} team="Leucine"
+        canManage={canManage} adding={addingLeuine}
+        newPerson={{ ...newPerson, team: 'Leucine' }} setNewPerson={setNewPerson}
         onAdd={() => setAddingLeuine(true)}
         onSave={() => addPerson('Leucine')}
         onCancel={() => { setAddingLeuine(false); setNewPerson({ ...EMPTY_PERSON }); }}
-        onFieldChange={savePersonField}
-        onDelete={removePerson}
+        onFieldChange={savePersonField} onDelete={removePerson}
       />
     </div>
   );
@@ -227,6 +195,16 @@ export default function PeopleTab({ project, canEdit }) {
 
 function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNewPerson, onAdd, onSave, onCancel, onFieldChange, onDelete }) {
   const [openMenuId, setOpenMenuId] = useState(null);
+  const ss = useSpreadsheet();
+
+  // Debounced save per person — avoids firing an API call on every keystroke
+  const saveTimers = useRef({});
+  const debouncedFieldChange = useCallback((person, field, value) => {
+    clearTimeout(saveTimers.current[`${person.id}_${field}`]);
+    saveTimers.current[`${person.id}_${field}`] = setTimeout(() => {
+      onFieldChange(person, field, value);
+    }, 600);
+  }, [onFieldChange]);
 
   // Close menu on outside click
   useEffect(() => {
@@ -237,7 +215,7 @@ function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNew
   }, [openMenuId]);
 
   return (
-    <div>
+    <div onClick={() => ss.clearAll()}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-gray-500" />
@@ -251,7 +229,7 @@ function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNew
         )}
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden select-none" onClick={e => e.stopPropagation()}>
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
@@ -265,7 +243,7 @@ function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNew
           <tbody>
             {people.map((person, i) => (
               <tr key={person.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                {/* Three-dots at start */}
+                {/* Three-dots menu */}
                 {canManage && (
                   <td className="px-1 py-2 w-8">
                     <div className="relative flex items-center justify-center">
@@ -291,23 +269,59 @@ function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNew
                     </div>
                   </td>
                 )}
-                <td className="px-4 py-2">
-                  <EditableCell
-                    value={person.name}
-                    onSave={v => onFieldChange(person, 'name', v)}
-                    canEdit={canManage}
-                    placeholder={person.role ? `{${team} ${person.role}}` : 'Fill in name…'}
-                  />
-                </td>
-                <td className="px-4 py-2">
-                  <EditableCell value={person.email} onSave={v => onFieldChange(person, 'email', v)} canEdit={canManage} type="email" placeholder="email@example.com" />
-                </td>
-                <td className="px-4 py-2">
-                  <EditableCell value={person.role} onSave={v => onFieldChange(person, 'role', v)} canEdit={canManage} placeholder="Role / Title" />
-                </td>
-                <td className="px-4 py-2">
-                  <EditableCell value={person.phone} onSave={v => onFieldChange(person, 'phone', v)} canEdit={canManage} type="tel" placeholder="+1 555 000 0000" />
-                </td>
+
+                {/* Name */}
+                <SCell ss={ss} rowId={person.id} colKey="name"
+                  value={person.name || ''}
+                  onChange={v => debouncedFieldChange(person, 'name', v)}
+                  rows={people} cols={EDIT_COLS}
+                  placeholder={person.role ? `{${team} ${person.role}}` : 'Fill in name…'}
+                  disabled={!canManage}
+                  readView={
+                    person.name
+                      ? <span className="text-gray-700 text-sm">{person.name}</span>
+                      : <span className="text-gray-400 italic text-xs">{person.role ? `{${team} ${person.role}}` : 'Fill in name…'}</span>
+                  } />
+
+                {/* Email */}
+                <SCell ss={ss} rowId={person.id} colKey="email"
+                  value={person.email || ''}
+                  onChange={v => debouncedFieldChange(person, 'email', v)}
+                  rows={people} cols={EDIT_COLS}
+                  type="text"
+                  placeholder="email@example.com"
+                  disabled={!canManage}
+                  readView={
+                    person.email
+                      ? <span className="text-gray-700 text-sm">{person.email}</span>
+                      : <span className="text-gray-400 italic text-xs">email@example.com</span>
+                  } />
+
+                {/* Role */}
+                <SCell ss={ss} rowId={person.id} colKey="role"
+                  value={person.role || ''}
+                  onChange={v => debouncedFieldChange(person, 'role', v)}
+                  rows={people} cols={EDIT_COLS}
+                  placeholder="Role / Title"
+                  disabled={!canManage}
+                  readView={
+                    person.role
+                      ? <span className="text-gray-700 text-sm">{person.role}</span>
+                      : <span className="text-gray-400 italic text-xs">Role / Title</span>
+                  } />
+
+                {/* Phone */}
+                <SCell ss={ss} rowId={person.id} colKey="phone"
+                  value={person.phone || ''}
+                  onChange={v => debouncedFieldChange(person, 'phone', v)}
+                  rows={people} cols={EDIT_COLS}
+                  placeholder="+1 555 000 0000"
+                  disabled={!canManage}
+                  readView={
+                    person.phone
+                      ? <span className="text-gray-700 text-sm">{person.phone}</span>
+                      : <span className="text-gray-400 italic text-xs">+1 555 000 0000</span>
+                  } />
               </tr>
             ))}
 
@@ -316,14 +330,9 @@ function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNew
               <tr className="bg-blue-50/30 border-t border-blue-100">
                 {canManage && <td className="w-8" />}
                 <td className="px-4 py-2">
-                  <input
-                    autoFocus
-                    type="text"
-                    placeholder="Name *"
-                    value={newPerson.name}
+                  <input autoFocus type="text" placeholder="Name *" value={newPerson.name}
                     onChange={e => setNewPerson(p => ({ ...p, name: e.target.value }))}
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  />
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
                 </td>
                 <td className="px-4 py-2">
                   <input type="email" placeholder="Email" value={newPerson.email}
@@ -361,45 +370,5 @@ function PeopleGroup({ title, people, team, canManage, adding, newPerson, setNew
         </table>
       </div>
     </div>
-  );
-}
-
-function EditableCell({ value, onSave, canEdit, type = 'text', placeholder = '—' }) {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(value || '');
-
-  useEffect(() => { setVal(value || ''); }, [value]);
-
-  function commit() {
-    setEditing(false);
-    if (val !== (value || '')) onSave(val);
-  }
-
-  if (!canEdit) return <span className="text-gray-700">{value || '—'}</span>;
-
-  if (editing) {
-    return (
-      <input
-        autoFocus
-        type={type}
-        value={val}
-        onChange={e => setVal(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setVal(value || ''); setEditing(false); } }}
-        className="w-full border border-blue-400 rounded px-2 py-0.5 text-sm focus:outline-none"
-      />
-    );
-  }
-
-  return (
-    <span
-      onClick={() => setEditing(true)}
-      className="block w-full cursor-text min-h-[1.5rem] hover:bg-blue-50 rounded px-1 py-0.5 transition"
-    >
-      {value
-        ? <span className="text-gray-700">{value}</span>
-        : <span className="text-gray-400 italic text-xs">{placeholder}</span>
-      }
-    </span>
   );
 }

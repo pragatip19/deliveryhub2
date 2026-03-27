@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 import { getUATItems, upsertUATItem, deleteUATItem, getPeople } from '../../../lib/supabase';
 import { UAT_STATUS_OPTIONS, UAT_BATCH_STATUS_OPTIONS } from '../../../lib/templates';
 import { useAuth } from '../../../contexts/AuthContext';
+import { useSpreadsheet } from '../../../lib/useSpreadsheet';
+import { SCell } from '../../shared/SCell';
 
 // ── Color maps ────────────────────────────────────────────────────────────────
 const STATUS_COLORS = {
@@ -21,48 +23,18 @@ const BATCH_STATUS_COLORS = {
   'Blocked':     'bg-red-100 text-red-700',
 };
 
-const ColoredSelect = ({ value, options, colorMap, onChange, disabled }) => {
-  const cls = colorMap[value] || 'bg-white text-gray-700';
-  return (
-    <select
-      value={value || ''}
-      onChange={e => onChange(e.target.value)}
-      disabled={disabled}
-      className={`w-full px-1.5 py-0.5 rounded text-xs font-medium border border-gray-200 focus:outline-none focus:border-blue-400 ${cls}`}
-    >
-      <option value="">—</option>
-      {options.map(o => <option key={o} value={o}>{o}</option>)}
-    </select>
-  );
+// Read-only colored pill
+const StatusPill = ({ value, colorMap }) => {
+  const cls = colorMap[value] || 'bg-gray-100 text-gray-700';
+  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${cls}`}>{value || '—'}</span>;
 };
 
 // ── MES UAT groups ────────────────────────────────────────────────────────────
 const MES_GROUPS = ['BMR', 'BPR', 'Logbooks / Processes'];
 const LOG_GROUPS = ['Logbooks / Processes'];
 
-// ── Editable number cell ──────────────────────────────────────────────────────
-const NumCell = ({ value, onChange, disabled }) => (
-  <input
-    type="number"
-    value={value ?? ''}
-    onChange={e => onChange(parseInt(e.target.value) || 0)}
-    disabled={disabled}
-    className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs text-right focus:outline-none focus:border-blue-400 disabled:bg-transparent disabled:border-transparent"
-    style={{ minWidth: 48 }}
-  />
-);
-
-// ── Editable text cell ────────────────────────────────────────────────────────
-const TextCell = ({ value, onChange, disabled, placeholder }) => (
-  <input
-    type="text"
-    value={value || ''}
-    onChange={e => onChange(e.target.value)}
-    disabled={disabled}
-    placeholder={placeholder}
-    className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent disabled:border-transparent"
-  />
-);
+const EDIT_COLS_MES = ['process', 'status', 'approver', 'batch1', 'batch2', 'batch3', 'paper', 'elim', 'auto', 'ctrl', 'rem', 'inter', 'comp'];
+const EDIT_COLS_LOG = ['process', 'status', 'approver', 'paper', 'elim', 'auto', 'ctrl', 'rem', 'inter', 'comp'];
 
 export default function UATTab({ project, canEdit }) {
   const { user, isAdmin, isDM } = useAuth();
@@ -70,6 +42,7 @@ export default function UATTab({ project, canEdit }) {
   const [people, setPeople]     = useState([]);
   const [loading, setLoading]   = useState(true);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const ss = useSpreadsheet();
 
   // Global batch dates
   const [batchDates, setBatchDates] = useState({
@@ -135,6 +108,7 @@ export default function UATTab({ project, canEdit }) {
   const isLogbooks = project?.uat_type === 'logbooks';
   const groups     = isMES ? MES_GROUPS : LOG_GROUPS;
   const canDelete  = isAdmin() || isDM();
+  const editCols   = isMES ? EDIT_COLS_MES : EDIT_COLS_LOG;
 
   // ── Load ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -256,6 +230,11 @@ export default function UATTab({ project, canEdit }) {
     return result;
   }, [uatItems, groups]);
 
+  // All visible items (for Tab/Enter navigation across groups)
+  const visibleItems = useMemo(() =>
+    uatItems.filter(i => i.group_name !== '__batch_config'),
+  [uatItems]);
+
   const cw = k => ({ width: colWidths[k], minWidth: colWidths[k] });
 
   if (loading) return <div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" /></div>;
@@ -271,10 +250,10 @@ export default function UATTab({ project, canEdit }) {
   const superTh = 'px-2 py-1 text-center text-xs font-bold border-r border-gray-300 bg-gray-200';
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-6 space-y-4" onClick={() => ss.clearAll()}>
       <h3 className="text-lg font-semibold">{isMES ? 'MES' : 'Logbooks'} UAT Tracker</h3>
 
-      <div className="overflow-x-auto border border-gray-300 rounded-lg select-none">
+      <div className="overflow-x-auto border border-gray-300 rounded-lg select-none" onClick={e => e.stopPropagation()}>
         <table className="border-collapse text-xs" style={{ minWidth: '100%' }}>
           <thead>
             {/* ── Super-header row ── */}
@@ -386,41 +365,40 @@ export default function UATTab({ project, canEdit }) {
                     </td>
 
                     {/* Process Name */}
-                    <td className={tdCls} style={cw('process')}>
-                      <TextCell value={item.process_name} disabled={!canEdit} placeholder="Process name…"
-                        onChange={v => handleChange(item.id, 'process_name', v)} />
-                    </td>
+                    <SCell ss={ss} rowId={item.id} colKey="process"
+                      value={item.process_name || ''}
+                      onChange={v => handleChange(item.id, 'process_name', v)}
+                      rows={visibleItems} cols={editCols}
+                      placeholder="Process name…"
+                      disabled={!canEdit} tdStyle={cw('process')} />
 
                     {/* Status */}
-                    <td className={tdCls} style={cw('status')}>
-                      {canEdit
-                        ? <ColoredSelect value={item.status} options={UAT_STATUS_OPTIONS} colorMap={STATUS_COLORS}
-                            onChange={v => handleChange(item.id, 'status', v)} />
-                        : <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_COLORS[item.status] || 'bg-gray-100 text-gray-600'}`}>{item.status || '—'}</span>
-                      }
-                    </td>
+                    <SCell ss={ss} rowId={item.id} colKey="status"
+                      value={item.status || ''}
+                      onChange={v => handleChange(item.id, 'status', v)}
+                      rows={visibleItems} cols={editCols}
+                      type="colored-select" options={UAT_STATUS_OPTIONS} colorMap={STATUS_COLORS}
+                      disabled={!canEdit} tdStyle={cw('status')}
+                      readView={<StatusPill value={item.status} colorMap={STATUS_COLORS} />} />
 
                     {/* UAT Approver */}
-                    <td className={tdCls} style={cw('approver')}>
-                      {canEdit
-                        ? <select value={item.uat_approver_id || ''} onChange={e => handleChange(item.id, 'uat_approver_id', e.target.value)}
-                            className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-xs bg-white focus:outline-none focus:border-blue-400">
-                            <option value="">—</option>
-                            {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                          </select>
-                        : people.find(p => p.id === item.uat_approver_id)?.name || '—'
-                      }
-                    </td>
+                    <SCell ss={ss} rowId={item.id} colKey="approver"
+                      value={item.uat_approver_id || ''}
+                      onChange={v => handleChange(item.id, 'uat_approver_id', v)}
+                      rows={visibleItems} cols={editCols}
+                      type="select" options={people.map(p => ({ value: p.id, label: p.name }))}
+                      disabled={!canEdit} tdStyle={cw('approver')}
+                      readView={<span>{people.find(p => p.id === item.uat_approver_id)?.name || '—'}</span>} />
 
                     {/* Batch statuses (MES only) */}
                     {isMES && [1,2,3].map(n => (
-                      <td key={n} className={tdCls} style={cw(`batch${n}`)}>
-                        {canEdit
-                          ? <ColoredSelect value={item[`batch_${n}_status`]} options={UAT_BATCH_STATUS_OPTIONS}
-                              colorMap={BATCH_STATUS_COLORS} onChange={v => handleChange(item.id, `batch_${n}_status`, v)} />
-                          : <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${BATCH_STATUS_COLORS[item[`batch_${n}_status`]] || ''}`}>{item[`batch_${n}_status`] || '—'}</span>
-                        }
-                      </td>
+                      <SCell key={n} ss={ss} rowId={item.id} colKey={`batch${n}`}
+                        value={item[`batch_${n}_status`] || ''}
+                        onChange={v => handleChange(item.id, `batch_${n}_status`, v)}
+                        rows={visibleItems} cols={editCols}
+                        type="colored-select" options={UAT_BATCH_STATUS_OPTIONS} colorMap={BATCH_STATUS_COLORS}
+                        disabled={!canEdit} tdStyle={cw(`batch${n}`)}
+                        readView={<StatusPill value={item[`batch_${n}_status`]} colorMap={BATCH_STATUS_COLORS} />} />
                     ))}
 
                     {/* Numeric fields */}
@@ -433,9 +411,13 @@ export default function UATTab({ project, canEdit }) {
                       ['interlocks',       'inter'],
                       ['compliance_score', 'comp'],
                     ].map(([field, colKey]) => (
-                      <td key={field} className={`${tdCls} text-right`} style={cw(colKey)}>
-                        <NumCell value={item[field]} disabled={!canEdit} onChange={v => handleChange(item.id, field, v)} />
-                      </td>
+                      <SCell key={field} ss={ss} rowId={item.id} colKey={colKey}
+                        value={String(item[field] ?? 0)}
+                        onChange={v => handleChange(item.id, field, parseInt(v) || 0)}
+                        rows={visibleItems} cols={editCols}
+                        type="number"
+                        disabled={!canEdit} tdStyle={cw(colKey)} tdClass="text-right"
+                        readView={<span className="ml-auto">{item[field] ?? '—'}</span>} />
                     ))}
 
                     {/* Row resize handle */}
