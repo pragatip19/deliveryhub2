@@ -25,7 +25,10 @@ const TABS = [
   { id: 'people',        label: 'People',         path: 'people' },
   { id: 'payments',      label: 'Payments',       path: 'payments' },
   { id: 'uat',           label: 'UAT',            path: 'uat' },
-  { id: 'raid',          label: 'RAID',           path: 'raid' },
+  { id: 'risks',         label: 'Risks',          path: 'risks' },
+  { id: 'assumptions',   label: 'Assumptions',    path: 'assumptions' },
+  { id: 'issues',        label: 'Issues',         path: 'issues' },
+  { id: 'dependencies',  label: 'Dependencies',   path: 'dependencies' },
   { id: 'feedback',      label: 'Feedback',       path: 'feedback' },
   { id: 'documents',     label: 'Documents',      path: 'documents' },
 ];
@@ -146,16 +149,18 @@ export default function ProjectPage() {
             element={<PaymentsTab project={project} canEdit={canEdit} />}
           />
           <Route path="uat" element={<UATTab project={project} canEdit={canEdit} />} />
-          <Route
-            path="raid"
-            element={
-              <div className="space-y-6">
-                {['risk', 'assumption', 'issue', 'dependency'].map(type => (
-                  <RaidTable key={type} project={project} canEdit={canEdit} type={type} />
-                ))}
-              </div>
-            }
-          />
+          <Route path="risks"        element={<RaidTable project={project} canEdit={canEdit} type="risk" />} />
+          <Route path="assumptions"  element={<RaidTable project={project} canEdit={canEdit} type="assumption" />} />
+          <Route path="issues"       element={<RaidTable project={project} canEdit={canEdit} type="issue" />} />
+          <Route path="dependencies" element={<RaidTable project={project} canEdit={canEdit} type="dependency" />} />
+          {/* Legacy combined RAID route */}
+          <Route path="raid" element={
+            <div className="space-y-6">
+              {['risk','assumption','issue','dependency'].map(t => (
+                <RaidTable key={t} project={project} canEdit={canEdit} type={t} />
+              ))}
+            </div>
+          } />
           <Route
             path="feedback"
             element={<FeedbackTab project={project} canEdit={canEdit} />}

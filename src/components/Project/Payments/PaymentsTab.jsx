@@ -79,16 +79,16 @@ const PaymentsTab = ({ project, canEdit }) => {
 
   const debouncedSave = useCallback(
     (() => {
-      let t;
+      const timers = {};
       return (item) => {
-        clearTimeout(t);
-        t = setTimeout(async () => {
-          try { await upsertPayment(project.id, item); }
-          catch { toast.error('Failed to save payment item'); }
+        clearTimeout(timers[item.id]);
+        timers[item.id] = setTimeout(async () => {
+          try { await upsertPayment(item); }
+          catch (e) { toast.error('Failed to save payment item: ' + (e?.message || '')); }
         }, 800);
       };
     })(),
-    [project.id]
+    []
   );
 
   const handleChange = useCallback((itemId, field, value) => {
@@ -96,7 +96,13 @@ const PaymentsTab = ({ project, canEdit }) => {
       const updated = prev.map(item => {
         if (item.id !== itemId) return item;
         let next = { ...item, [field]: value };
+        // Invoice Sent → zero out pending
         if (field === 'payment_status' && value === 'Invoice Sent') next.pending_milestone_amount = 0;
+        // Not Paid / Project Pending → restore pending to amount
+        if (field === 'payment_status' && (value === 'Not Paid' || value === 'Project Pending')) {
+          next.pending_milestone_amount = parseFloat(next.amount) || 0;
+        }
+        // Changing amount while not invoiced → mirror to pending
         if (field === 'amount') {
           const shouldMirror = item.payment_status !== 'Invoice Sent' && item.payment_status !== 'Paid';
           if (shouldMirror) next.pending_milestone_amount = parseFloat(value) || 0;
