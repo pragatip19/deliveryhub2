@@ -183,17 +183,28 @@ export default function ProjectHealth({ project, canEdit }) {
     ),
     [tasks, todayISO]
   );
-  const urgentTasks = useMemo(() =>
-    tasks.filter(t => {
+  const urgentTasks = useMemo(() => {
+    const todayDate = today();
+    return tasks.filter(t => {
       if (t.status === 'Done' || t.status === 'Not Applicable') return false;
-      // Show any task with at least 1 day of delay so nothing slips through.
-      // days_delay is computed by recalculatePlan after load:
-      //   Not Started → days past baseline_planned_end (or planned_end)
-      //   In Progress → days past planned_end
-      return typeof t.days_delay === 'number' && t.days_delay > 0;
-    }),
-    [tasks]
-  );
+
+      // Primary: use the recalculated days_delay (covers most cases)
+      if (typeof t.days_delay === 'number' && t.days_delay > 10) return true;
+
+      // Fallback: compare baseline_planned_end directly vs today.
+      // This catches "In Progress" tasks whose planned_end was cascade-pushed to a
+      // future date before the user marked them In Progress — in that case the DB
+      // stores a future planned_end so calcDaysDelay returns 0, but the task is
+      // still delayed vs its original baseline schedule.
+      const baselineEnd = t.baseline_planned_end ? parseDate(t.baseline_planned_end) : null;
+      if (baselineEnd && baselineEnd < todayDate) {
+        const delayVsBaseline = Math.max(0, networkdays(baselineEnd, todayDate) - 1);
+        if (delayVsBaseline > 10) return true;
+      }
+
+      return false;
+    });
+  }, [tasks]);
 
   async function saveField(field, value) {
     try {
@@ -510,22 +521,32 @@ export default function ProjectHealth({ project, canEdit }) {
           <p className="text-xs text-slate-400 italic">No activities need immediate attention.</p>
         ) : (
           <div className="space-y-2 overflow-y-auto pr-1 flex-1">
-            {urgentTasks.map(t => (
-              <div key={t.id} className="bg-white rounded-lg p-2.5 border border-red-100">
-                <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
-                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                    t.status === 'Not Started' ? 'bg-gray-100 text-gray-600' : 'bg-orange-100 text-orange-700'
-                  }`}>{t.status}</span>
-                  {typeof t.days_delay === 'number' && t.days_delay > 0 && (
-                    <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">+{t.days_delay}d</span>
-                  )}
-                  {t.status === 'Not Started' && t.planned_end && (
-                    <span className="text-[10px] text-slate-400">Due {fmtDate(t.planned_end)}</span>
-                  )}
+            {urgentTasks.map(t => {
+              // Determine best delay figure to display: prefer recalculated days_delay,
+              // fall back to baseline comparison when cascade pushed planned_end to future
+              const todayDate = today();
+              const baselineEnd = t.baseline_planned_end ? parseDate(t.baseline_planned_end) : null;
+              const baselineDelay = baselineEnd && baselineEnd < todayDate
+                ? Math.max(0, networkdays(baselineEnd, todayDate) - 1) : 0;
+              const displayDelay = (typeof t.days_delay === 'number' && t.days_delay > 0)
+                ? t.days_delay : baselineDelay;
+              return (
+                <div key={t.id} className="bg-white rounded-lg p-2.5 border border-red-100">
+                  <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                      t.status === 'Not Started' ? 'bg-gray-100 text-gray-600' : 'bg-orange-100 text-orange-700'
+                    }`}>{t.status}</span>
+                    {displayDelay > 0 && (
+                      <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">+{displayDelay}d</span>
+                    )}
+                    {t.baseline_planned_end && (
+                      <span className="text-[10px] text-slate-400">Baseline end {fmtDate(t.baseline_planned_end)}</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
