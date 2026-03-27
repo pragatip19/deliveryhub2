@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Plus, MoreVertical, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getUATItems, upsertUATItem, deleteUATItem } from '../../../lib/supabase';
+import { getUATItems, upsertUATItem, deleteUATItem, getPeople } from '../../../lib/supabase';
 import { UAT_STATUS_OPTIONS, UAT_BATCH_STATUS_OPTIONS } from '../../../lib/templates';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useSpreadsheet } from '../../../lib/useSpreadsheet';
@@ -41,6 +41,15 @@ export default function UATTab({ project, canEdit }) {
   const [uatItems, setUatItems] = useState([]);
   const [loading, setLoading]   = useState(true);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [people, setPeople]     = useState([]);
+
+  // Approver is stored client-side in localStorage (DB column doesn't exist yet)
+  const APPROVER_LS_KEY = `uatApprovers_${project?.id}`;
+  const [approverMap, setApproverMap] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(`uatApprovers_${project?.id}`)) || {}; }
+    catch { return {}; }
+  });
+
   const ss = useSpreadsheet();
 
   // Global batch dates
@@ -109,13 +118,19 @@ export default function UATTab({ project, canEdit }) {
   const canDelete  = isAdmin() || isDM();
   const editCols   = isMES ? EDIT_COLS_MES : EDIT_COLS_LOG;
 
+  // Persist approverMap to localStorage
+  useEffect(() => {
+    try { localStorage.setItem(APPROVER_LS_KEY, JSON.stringify(approverMap)); } catch {}
+  }, [approverMap]);
+
   // ── Load ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     async function load() {
       try {
         setLoading(true);
-        const items = await getUATItems(project.id);
+        const [items, allPeople] = await Promise.all([getUATItems(project.id), getPeople(project.id)]);
         setUatItems(items || []);
+        setPeople(allPeople || []);
         const cfg = (items || []).find(i => i.group_name === '__batch_config');
         if (cfg) {
           setBatchCfgId(cfg.id);
@@ -377,13 +392,23 @@ export default function UATTab({ project, canEdit }) {
                       disabled={!canEdit} tdStyle={cw('status')}
                       readView={<StatusPill value={item.status} colorMap={STATUS_COLORS} />} />
 
-                    {/* UAT Approver (freetext name) */}
-                    <SCell ss={ss} rowId={item.id} colKey="approver"
-                      value={item.approver || ''}
-                      onChange={v => handleChange(item.id, 'approver', v)}
-                      rows={visibleItems} cols={editCols}
-                      placeholder="Approver name…"
-                      disabled={!canEdit} tdStyle={cw('approver')} />
+                    {/* UAT Approver — stored in localStorage (no DB column yet) */}
+                    <td className={`px-2 border-r border-gray-200`} style={cw('approver')}>
+                      {canEdit ? (
+                        <select
+                          value={approverMap[item.id] || ''}
+                          onChange={e => setApproverMap(prev => ({ ...prev, [item.id]: e.target.value }))}
+                          className="w-full px-1 py-0.5 text-xs border border-transparent rounded hover:border-gray-300 focus:outline-none focus:border-blue-400 bg-transparent"
+                        >
+                          <option value="">— Select Approver —</option>
+                          {people.map(p => (
+                            <option key={p.id} value={p.name}>{p.name}{p.team ? ` (${p.team})` : ''}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-xs text-gray-700">{approverMap[item.id] || '—'}</span>
+                      )}
+                    </td>
 
                     {/* Batch statuses (MES only) */}
                     {isMES && [1,2,3].map(n => (

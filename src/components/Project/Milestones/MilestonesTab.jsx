@@ -373,7 +373,8 @@ const MilestonesTab = ({ project, canEdit }) => {
     setDragIndex(null);
     setDragOver(null);
     try {
-      await bulkUpsertMilestones(withOrder.map(m => ({ id: m.id, project_id: m.project_id, sort_order: m.sort_order })));
+      // Send full objects — partial upsert can fail when NOT NULL columns (e.g. name) are omitted
+      await bulkUpsertMilestones(withOrder);
     } catch (err) {
       console.error(err);
       toast.error('Failed to save order');
