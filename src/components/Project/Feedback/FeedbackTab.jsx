@@ -4,48 +4,37 @@ import toast from 'react-hot-toast';
 import { getFeedbackItems, upsertFeedbackItem, deleteFeedbackItem } from '../../../lib/supabase';
 import { FEEDBACK_TEMPLATE, FEEDBACK_PRIORITY_OPTIONS, FEEDBACK_DEV_STATUS_OPTIONS } from '../../../lib/templates';
 import { useAuth } from '../../../contexts/AuthContext';
+import { useSpreadsheet } from '../../../lib/useSpreadsheet';
+import { SCell } from '../../shared/SCell';
 
 const PRIORITY_COLORS = {
   'Critical': 'bg-red-100 text-red-800',
-  'High': 'bg-orange-100 text-orange-800',
-  'Medium': 'bg-yellow-100 text-yellow-800',
-  'Low': 'bg-blue-100 text-blue-800',
+  'High':     'bg-orange-100 text-orange-800',
+  'Medium':   'bg-yellow-100 text-yellow-800',
+  'Low':      'bg-blue-100 text-blue-800',
 };
 
 const DEV_STATUS_COLORS = {
   'Not Started': 'bg-gray-100 text-gray-800',
   'In Progress': 'bg-yellow-100 text-yellow-800',
-  'Done': 'bg-green-100 text-green-800',
-  'On Hold': 'bg-purple-100 text-purple-800',
-  'Cancelled': 'bg-red-100 text-red-800',
+  'Done':        'bg-green-100 text-green-800',
+  'On Hold':     'bg-purple-100 text-purple-800',
+  'Cancelled':   'bg-red-100 text-red-800',
 };
+
+const EDIT_COLS = ['requirement', 'delivery_priority', 'clickup_task_id', 'dev_status', 'due_date_committed'];
 
 const isValidUrl = (string) => {
-  try {
-    new URL(string);
-    return true;
-  } catch (_) {
-    return false;
-  }
-};
-
-const extractClickupTaskId = (input) => {
-  // Try to extract task ID from clickup URL
-  const urlMatch = input.match(/clickup\.com\/t\/([A-Z0-9]+)/);
-  if (urlMatch) return urlMatch[1];
-
-  // If it looks like a task ID already, return it
-  if (/^[A-Z0-9]+$/.test(input)) return input;
-
-  return null;
+  try { new URL(string); return true; } catch { return false; }
 };
 
 const FeedbackTab = ({ project, canEdit }) => {
   const { user, isAdmin, isDM } = useAuth();
   const [feedbackItems, setFeedbackItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]   = useState(true);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
-  const [filters, setFilters] = useState({});
+  const [filters, setFilters]   = useState({});
+  const ss = useSpreadsheet();
 
   const canDeleteRows = isAdmin() || isDM();
 
@@ -62,22 +51,17 @@ const FeedbackTab = ({ project, canEdit }) => {
         setLoading(false);
       }
     };
-
-    if (project?.id) {
-      loadData();
-    }
+    if (project?.id) loadData();
   }, [project?.id]);
 
   const debouncedSave = useCallback(
     (() => {
-      let timeoutId;
+      const timers = {};
       return (item) => {
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(async () => {
-          try {
-            await upsertFeedbackItem(project.id, item);
-            toast.success('Feedback item saved');
-          } catch (error) {
+        clearTimeout(timers[item.id]);
+        timers[item.id] = setTimeout(async () => {
+          try { await upsertFeedbackItem(project.id, item); }
+          catch (error) {
             console.error('Error saving feedback item:', error);
             toast.error('Failed to save feedback item');
           }
@@ -87,30 +71,19 @@ const FeedbackTab = ({ project, canEdit }) => {
     [project.id]
   );
 
-  const handleCellChange = useCallback(
-    (itemId, field, value) => {
-      setFeedbackItems(prevItems =>
-        prevItems.map(item =>
-          item.id === itemId ? { ...item, [field]: value } : item
-        )
-      );
-
-      const item = feedbackItems.find(i => i.id === itemId);
-      if (item) {
-        debouncedSave({ ...item, [field]: value });
-      }
-    },
-    [feedbackItems, debouncedSave]
-  );
+  const handleCellChange = useCallback((itemId, field, value) => {
+    setFeedbackItems(prevItems => {
+      const next = prevItems.map(item => item.id === itemId ? { ...item, [field]: value } : item);
+      const item = next.find(i => i.id === itemId);
+      if (item) debouncedSave(item);
+      return next;
+    });
+  }, [debouncedSave]);
 
   const handleAddRow = useCallback(() => {
-    const maxNumber = Math.max(
-      0,
-      ...feedbackItems.map(item => item.number || 0)
-    );
-
+    const maxNumber = Math.max(0, ...feedbackItems.map(item => item.number || 0));
     const newItem = {
-      id: `feedback_${Date.now()}`,
+      id: crypto.randomUUID(),
       project_id: project.id,
       number: maxNumber + 1,
       requirement: '',
@@ -119,189 +92,52 @@ const FeedbackTab = ({ project, canEdit }) => {
       dev_status: 'Not Started',
       due_date_committed: null,
     };
-
     setFeedbackItems(prev => [...prev, newItem]);
     debouncedSave(newItem);
   }, [feedbackItems, project.id, debouncedSave]);
 
-  const handleDeleteRow = useCallback(
-    async (itemId) => {
-      try {
-        await deleteFeedbackItem(itemId);
-        setFeedbackItems(prev => prev.filter(item => item.id !== itemId));
-        toast.success('Feedback item deleted');
-      } catch (error) {
-        console.error('Error deleting feedback item:', error);
-        toast.error('Failed to delete feedback item');
-      }
-    },
-    []
-  );
+  const handleDeleteRow = useCallback(async (itemId) => {
+    try {
+      await deleteFeedbackItem(itemId);
+      setFeedbackItems(prev => prev.filter(item => item.id !== itemId));
+      toast.success('Feedback item deleted');
+    } catch (error) {
+      console.error('Error deleting feedback item:', error);
+      toast.error('Failed to delete feedback item');
+    }
+  }, []);
 
   const sortedItems = useMemo(() => {
     let sorted = [...feedbackItems];
-
-    // Apply filters
     Object.entries(filters).forEach(([key, value]) => {
       if (value && value !== '') {
-        sorted = sorted.filter(item => {
-          const itemValue = String(item[key]).toLowerCase();
-          return itemValue.includes(String(value).toLowerCase());
-        });
+        sorted = sorted.filter(item => String(item[key]).toLowerCase().includes(String(value).toLowerCase()));
       }
     });
-
-    // Apply sorting
     if (sortConfig.key) {
       sorted.sort((a, b) => {
         const aVal = a[sortConfig.key];
         const bVal = b[sortConfig.key];
-
         if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
         if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
       });
     }
-
     return sorted;
   }, [feedbackItems, sortConfig, filters]);
-
-  const handleSort = (key) => {
-    setSortConfig(prevConfig => {
-      if (prevConfig.key === key) {
-        return {
-          key,
-          direction: prevConfig.direction === 'asc' ? 'desc' : 'asc',
-        };
-      }
-      return { key, direction: 'asc' };
-    });
-  };
-
-  const renderStatusPill = (status, colorMap) => {
-    const colors = colorMap[status] || 'bg-gray-100 text-gray-800';
-    return (
-      <span className={`px-2 py-1 rounded text-sm font-medium ${colors}`}>
-        {status}
-      </span>
-    );
-  };
-
-  const renderCell = (item, field, itemId) => {
-    const value = item[field];
-    const isDateField = field === 'due_date_committed';
-    const isPriorityField = field === 'delivery_priority';
-    const isDevStatusField = field === 'dev_status';
-    const isClickupField = field === 'clickup_task_id';
-
-    if (!canEdit) {
-      if (isPriorityField) {
-        return renderStatusPill(value, PRIORITY_COLORS);
-      }
-      if (isDevStatusField) {
-        return renderStatusPill(value, DEV_STATUS_COLORS);
-      }
-      if (isClickupField && value) {
-        const isUrl = isValidUrl(value);
-        return isUrl ? (
-          <a
-            href={value}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
-          >
-            {value}
-            <ExternalLink size={14} />
-          </a>
-        ) : (
-          <span>{value}</span>
-        );
-      }
-      if (isDateField) {
-        return value ? new Date(value).toLocaleDateString() : '-';
-      }
-      return value || '-';
-    }
-
-    if (isPriorityField) {
-      return (
-        <select
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        >
-          <option value="">Select priority</option>
-          {FEEDBACK_PRIORITY_OPTIONS.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      );
-    }
-
-    if (isDevStatusField) {
-      return (
-        <select
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        >
-          <option value="">Select status</option>
-          {FEEDBACK_DEV_STATUS_OPTIONS.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      );
-    }
-
-    if (isDateField) {
-      return (
-        <input
-          type="date"
-          value={value || ''}
-          onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        />
-      );
-    }
-
-    if (isClickupField) {
-      return (
-        <input
-          type="text"
-          value={value || ''}
-          onChange={(e) => {
-            const input = e.target.value;
-            // If it's a URL or looks like a task ID, store the full input
-            handleCellChange(itemId, field, input);
-          }}
-          placeholder="Paste URL or task ID"
-          className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-        />
-      );
-    }
-
-    return (
-      <input
-        type="text"
-        value={value || ''}
-        onChange={(e) => handleCellChange(itemId, field, e.target.value)}
-        className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-      />
-    );
-  };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 p-6" onClick={() => ss.clearAll()}>
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold">Feedback & Requirements</h3>
+        <h3 className="text-lg font-semibold">Feedback &amp; Requirements</h3>
         {canEdit && (
           <button
             onClick={handleAddRow}
@@ -312,7 +148,7 @@ const FeedbackTab = ({ project, canEdit }) => {
         )}
       </div>
 
-      <div className="overflow-x-auto border border-gray-300 rounded-lg">
+      <div className="overflow-x-auto border border-gray-300 rounded-lg select-none" onClick={e => e.stopPropagation()}>
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="bg-gray-100 border-b">
@@ -331,12 +167,80 @@ const FeedbackTab = ({ project, canEdit }) => {
                 key={item.id}
                 className={idx % 2 === 0 ? 'bg-white border-b' : 'bg-gray-50 border-b'}
               >
-                <td className="px-4 py-2 text-center border-r font-medium">{item.number}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'requirement', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'delivery_priority', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'clickup_task_id', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'dev_status', item.id)}</td>
-                <td className="px-4 py-2 border-r">{renderCell(item, 'due_date_committed', item.id)}</td>
+                {/* Row number — not editable */}
+                <td className="px-4 py-2 text-center border-r font-medium text-xs">{item.number}</td>
+
+                {/* Requirement */}
+                <SCell ss={ss} rowId={item.id} colKey="requirement"
+                  value={item.requirement || ''}
+                  onChange={v => handleCellChange(item.id, 'requirement', v)}
+                  rows={sortedItems} cols={EDIT_COLS}
+                  placeholder="Enter requirement…"
+                  disabled={!canEdit} />
+
+                {/* Priority */}
+                <SCell ss={ss} rowId={item.id} colKey="delivery_priority"
+                  value={item.delivery_priority || ''}
+                  onChange={v => handleCellChange(item.id, 'delivery_priority', v)}
+                  rows={sortedItems} cols={EDIT_COLS}
+                  type="colored-select"
+                  options={FEEDBACK_PRIORITY_OPTIONS}
+                  colorMap={PRIORITY_COLORS}
+                  disabled={!canEdit}
+                  readView={
+                    item.delivery_priority
+                      ? <span className={`px-2 py-0.5 rounded text-xs font-medium ${PRIORITY_COLORS[item.delivery_priority] || 'bg-gray-100 text-gray-800'}`}>{item.delivery_priority}</span>
+                      : <span className="text-gray-400 text-xs">—</span>
+                  } />
+
+                {/* Clickup Task ID */}
+                <SCell ss={ss} rowId={item.id} colKey="clickup_task_id"
+                  value={item.clickup_task_id || ''}
+                  onChange={v => handleCellChange(item.id, 'clickup_task_id', v)}
+                  rows={sortedItems} cols={EDIT_COLS}
+                  placeholder="Paste URL or task ID"
+                  disabled={!canEdit}
+                  readView={
+                    item.clickup_task_id
+                      ? isValidUrl(item.clickup_task_id)
+                        ? <a href={item.clickup_task_id} target="_blank" rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-xs">
+                            {item.clickup_task_id} <ExternalLink size={11} />
+                          </a>
+                        : <span className="text-xs">{item.clickup_task_id}</span>
+                      : <span className="text-gray-400 text-xs">—</span>
+                  } />
+
+                {/* Dev Status */}
+                <SCell ss={ss} rowId={item.id} colKey="dev_status"
+                  value={item.dev_status || ''}
+                  onChange={v => handleCellChange(item.id, 'dev_status', v)}
+                  rows={sortedItems} cols={EDIT_COLS}
+                  type="colored-select"
+                  options={FEEDBACK_DEV_STATUS_OPTIONS}
+                  colorMap={DEV_STATUS_COLORS}
+                  disabled={!canEdit}
+                  readView={
+                    item.dev_status
+                      ? <span className={`px-2 py-0.5 rounded text-xs font-medium ${DEV_STATUS_COLORS[item.dev_status] || 'bg-gray-100 text-gray-800'}`}>{item.dev_status}</span>
+                      : <span className="text-gray-400 text-xs">—</span>
+                  } />
+
+                {/* Due Date */}
+                <SCell ss={ss} rowId={item.id} colKey="due_date_committed"
+                  value={item.due_date_committed || ''}
+                  onChange={v => handleCellChange(item.id, 'due_date_committed', v)}
+                  rows={sortedItems} cols={EDIT_COLS}
+                  type="date"
+                  disabled={!canEdit}
+                  readView={
+                    item.due_date_committed
+                      ? <span className="text-xs">{new Date(item.due_date_committed).toLocaleDateString()}</span>
+                      : <span className="text-gray-400 text-xs">—</span>
+                  } />
+
+                {/* Actions */}
                 <td className="px-4 py-2 text-center">
                   {canDeleteRows && (
                     <button
@@ -352,7 +256,7 @@ const FeedbackTab = ({ project, canEdit }) => {
             ))}
             {sortedItems.length === 0 && (
               <tr>
-                <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                <td colSpan="7" className="px-4 py-8 text-center text-gray-500 text-sm">
                   No feedback items yet. {canEdit && 'Click "Add Row" to create one.'}
                 </td>
               </tr>

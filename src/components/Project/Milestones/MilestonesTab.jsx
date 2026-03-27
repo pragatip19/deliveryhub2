@@ -75,6 +75,7 @@ const MilestonesTab = ({ project, canEdit }) => {
   const [saving, setSaving]             = useState(false);
   const [editingId, setEditingId]       = useState(null);
   const [editingName, setEditingName]   = useState('');
+  const [selectedId, setSelectedId]     = useState(null); // first-click selection
   const [openMenuId, setOpenMenuId]     = useState(null); // 3-dot menu state
 
   // Resize state
@@ -288,7 +289,7 @@ const MilestonesTab = ({ project, canEdit }) => {
     } finally { setSaving(false); }
   };
 
-  const handleSaveName = async (milestoneId) => {
+  const handleSaveName = async (milestoneId, moveToNext = false) => {
     if (!editingName.trim()) { setEditingId(null); return; }
     try {
       setSaving(true);
@@ -297,6 +298,20 @@ const MilestonesTab = ({ project, canEdit }) => {
         prev.map((m) => (m.id === milestoneId ? { ...m, name: editingName.trim() } : m))
       );
       setEditingId(null);
+      if (moveToNext) {
+        // Move selection + edit to next milestone
+        const idx = milestones.findIndex(m => m.id === milestoneId);
+        const next = milestones[idx + 1];
+        if (next) {
+          setSelectedId(next.id);
+          setEditingId(next.id);
+          setEditingName(next.name);
+        } else {
+          setSelectedId(milestoneId);
+        }
+      } else {
+        setSelectedId(milestoneId);
+      }
     } catch (error) {
       console.error(error);
       toast.error('Failed to update milestone');
@@ -366,7 +381,7 @@ const MilestonesTab = ({ project, canEdit }) => {
   const weekW = { width: weekColWidth, minWidth: weekColWidth };
 
   return (
-    <div className="space-y-4 p-6 bg-gray-50 rounded-lg">
+    <div className="space-y-4 p-6 bg-gray-50 rounded-lg" onClick={() => { setSelectedId(null); setEditingId(null); }}>
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-900">Project Milestones</h2>
@@ -383,7 +398,7 @@ const MilestonesTab = ({ project, canEdit }) => {
       </div>
 
       {/* Gantt Chart — single scroll container so scrollbar sits at the very bottom */}
-      <div className="bg-white rounded-lg shadow select-none overflow-hidden">
+      <div className="bg-white rounded-lg shadow select-none overflow-hidden" onClick={e => e.stopPropagation()}>
         <div
           className="overflow-x-auto overflow-y-auto"
           style={{ maxHeight: 'calc(100vh - 320px)' }}
@@ -560,10 +575,28 @@ const MilestonesTab = ({ project, canEdit }) => {
                       {index + 1}
                     </div>
 
-                    {/* Milestone Name — coloured badge */}
+                    {/* Milestone Name — coloured badge; first click = select, second click = edit */}
                     <div
-                      className="flex items-center px-3 border-r border-gray-200 overflow-hidden flex-shrink-0"
+                      className={`flex items-center px-3 border-r border-gray-200 overflow-hidden flex-shrink-0 cursor-default transition ${
+                        editingId === milestone.id
+                          ? 'outline outline-2 outline-blue-500 bg-white'
+                          : selectedId === milestone.id
+                            ? 'outline outline-1 outline-blue-300 bg-blue-50/40'
+                            : ''
+                      }`}
                       style={cellW('name')}
+                      onClick={() => {
+                        if (!canEdit) return;
+                        if (selectedId === milestone.id && editingId !== milestone.id) {
+                          // Second click — enter edit mode
+                          setEditingId(milestone.id);
+                          setEditingName(milestone.name);
+                        } else if (editingId !== milestone.id) {
+                          // First click — select only
+                          setSelectedId(milestone.id);
+                          setEditingId(null);
+                        }
+                      }}
                     >
                       {editingId === milestone.id ? (
                         <input
@@ -572,30 +605,25 @@ const MilestonesTab = ({ project, canEdit }) => {
                           onChange={(e) => setEditingName(e.target.value)}
                           onBlur={() => handleSaveName(milestone.id)}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSaveName(milestone.id);
-                            if (e.key === 'Escape') setEditingId(null);
+                            if (e.key === 'Enter') { e.preventDefault(); handleSaveName(milestone.id, true); }
+                            if (e.key === 'Escape') { setEditingId(null); setSelectedId(milestone.id); }
                           }}
                           autoFocus
-                          className="w-full px-2 py-1 border border-blue-500 rounded text-sm"
+                          className="w-full px-2 py-0.5 border-0 bg-transparent focus:outline-none text-xs font-semibold"
+                          onClick={e => e.stopPropagation()}
                         />
                       ) : (
-                        <button
-                          onClick={() => canEdit && (setEditingId(milestone.id), setEditingName(milestone.name))}
-                          disabled={!canEdit}
-                          className="truncate w-full text-left"
+                        <span
+                          className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold border truncate max-w-full"
+                          style={{
+                            backgroundColor: milestone.color?.bg,
+                            color: milestone.color?.text,
+                            borderColor: milestone.color?.border,
+                          }}
                           title={milestone.name}
                         >
-                          <span
-                            className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold border truncate max-w-full"
-                            style={{
-                              backgroundColor: milestone.color?.bg,
-                              color: milestone.color?.text,
-                              borderColor: milestone.color?.border,
-                            }}
-                          >
-                            {milestone.name}
-                          </span>
-                        </button>
+                          {milestone.name}
+                        </span>
                       )}
                     </div>
 
