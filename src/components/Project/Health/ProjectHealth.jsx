@@ -426,13 +426,16 @@ export default function ProjectHealth({ project, canEdit }) {
                     </>
                   )}
                 </div>
-                {/* Action text */}
-                <input
-                  type="text"
+                {/* Action text — textarea so Shift+Enter inserts a new line */}
+                <textarea
                   value={action.text}
                   onChange={e => updateField('text', e.target.value)}
-                  placeholder="Action item…"
-                  className="flex-1 text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) e.preventDefault(); // plain Enter does nothing
+                  }}
+                  placeholder="Action item… (Shift+Enter for new line)"
+                  rows={Math.max(1, (action.text || '').split('\n').length)}
+                  className="flex-1 text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white resize-none overflow-hidden"
                 />
                 {/* Status */}
                 <select

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, MoreVertical, Trash2, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Plus, MoreVertical, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getRaidItems, upsertRaidItem, deleteRaidItem } from '../../../lib/supabase';
 
@@ -38,14 +38,51 @@ const ColoredSelect = ({ value, options, colorMap, onChange, disabled }) => {
   );
 };
 
+const DEFAULT_COLS = { expand: 28, num: 32, title: 320, status: 120, impact: 100, probability: 100, owner: 130, due_date: 110, actions: 36 };
+
 export default function RaidTable({ project, canEdit, type }) {
   const [items, setItems]         = useState([]);
   const [loading, setLoading]     = useState(true);
-  const [expandedId, setExpandedId] = useState(null);  // which row is expanded
+  const [expandedId, setExpandedId] = useState(null);
   const [openMenuId, setOpenMenuId] = useState(null);
-  const [editingItem, setEditingItem] = useState(null); // draft of expanded item
+  const [editingItem, setEditingItem] = useState(null);
+
+  // Column resize
+  const LS_KEY = `raidCols_${type}`;
+  const [colWidths, setColWidths] = useState(() => {
+    try { const s = localStorage.getItem(LS_KEY); return s ? { ...DEFAULT_COLS, ...JSON.parse(s) } : { ...DEFAULT_COLS }; }
+    catch { return { ...DEFAULT_COLS }; }
+  });
+  const resizingRef = useRef(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(colWidths)); } catch {}
+  }, [colWidths]);
+
+  useEffect(() => {
+    const onMove = e => {
+      if (!resizingRef.current) return;
+      const { key, startX, startW } = resizingRef.current;
+      setColWidths(p => ({ ...p, [key]: Math.max(40, startW + (e.clientX - startX)) }));
+    };
+    const onUp = () => { resizingRef.current = null; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
 
   const config = TYPE_CONFIG[type] || TYPE_CONFIG.risk;
+  const cw = k => ({ width: colWidths[k], minWidth: colWidths[k] });
+
+  const ResizeHandle = ({ colKey }) => (
+    <div
+      className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-60 z-10"
+      onMouseDown={e => {
+        e.preventDefault(); e.stopPropagation();
+        resizingRef.current = { key: colKey, startX: e.clientX, startW: colWidths[colKey] };
+      }}
+    />
+  );
 
   useEffect(() => { load(); }, [project.id, type]);
 
@@ -146,16 +183,16 @@ export default function RaidTable({ project, canEdit, type }) {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 font-semibold">
-                <th className="w-8 px-2 py-2" />
-                <th className="w-8 px-2 py-2 text-center">#</th>
-                <th className="px-3 py-2 text-left">Title</th>
-                <th className="px-3 py-2 text-left w-28">Status</th>
-                <th className="px-3 py-2 text-left w-24">Impact</th>
-                <th className="px-3 py-2 text-left w-24">Probability</th>
-                <th className="px-3 py-2 text-left w-32">Owner</th>
-                <th className="px-3 py-2 text-left w-28">Due Date</th>
-                <th className="w-8 px-2 py-2" />
+              <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 font-semibold select-none">
+                <th className="relative px-1 py-2 border-r border-gray-200" style={cw('expand')} />
+                <th className="relative px-2 py-2 text-center border-r border-gray-200" style={cw('num')}>#<ResizeHandle colKey="num"/></th>
+                <th className="relative px-3 py-2 text-left border-r border-gray-200" style={cw('title')}>Title<ResizeHandle colKey="title"/></th>
+                <th className="relative px-3 py-2 text-left border-r border-gray-200" style={cw('status')}>Status<ResizeHandle colKey="status"/></th>
+                <th className="relative px-3 py-2 text-left border-r border-gray-200" style={cw('impact')}>Impact<ResizeHandle colKey="impact"/></th>
+                <th className="relative px-3 py-2 text-left border-r border-gray-200" style={cw('probability')}>Probability<ResizeHandle colKey="probability"/></th>
+                <th className="relative px-3 py-2 text-left border-r border-gray-200" style={cw('owner')}>Owner<ResizeHandle colKey="owner"/></th>
+                <th className="relative px-3 py-2 text-left border-r border-gray-200" style={cw('due_date')}>Due Date<ResizeHandle colKey="due_date"/></th>
+                <th className="relative px-2 py-2" style={cw('actions')} />
               </tr>
             </thead>
             <tbody>
@@ -167,22 +204,22 @@ export default function RaidTable({ project, canEdit, type }) {
                     onClick={() => toggleExpand(item)}
                   >
                     {/* Expand icon */}
-                    <td className="px-2 py-2 text-gray-400">
+                    <td className="px-1 py-2 text-gray-400 border-r border-gray-100" style={cw('expand')}>
                       {expandedId === item.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     </td>
-                    <td className="px-2 py-2 text-xs text-gray-400 text-center">{i + 1}</td>
-                    <td className="px-3 py-2 font-medium text-gray-800 truncate max-w-xs">{item.title || <span className="text-gray-400 italic">Untitled</span>}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-2 text-xs text-gray-400 text-center border-r border-gray-100" style={cw('num')}>{i + 1}</td>
+                    <td className="px-3 py-2 font-medium text-gray-800 truncate border-r border-gray-100" style={cw('title')}>{item.title || <span className="text-gray-400 italic">Untitled</span>}</td>
+                    <td className="px-3 py-2 border-r border-gray-100" style={cw('status')}>
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[item.status] || 'bg-gray-100 text-gray-600'}`}>{item.status || '—'}</span>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 border-r border-gray-100" style={cw('impact')}>
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${IMPACT_COLORS[item.impact] || 'bg-gray-100 text-gray-600'}`}>{item.impact || '—'}</span>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 border-r border-gray-100" style={cw('probability')}>
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${IMPACT_COLORS[item.probability] || 'bg-gray-100 text-gray-600'}`}>{item.probability || '—'}</span>
                     </td>
-                    <td className="px-3 py-2 text-gray-600 text-xs">{item.owner || '—'}</td>
-                    <td className="px-3 py-2 text-gray-500 text-xs">{item.due_date || '—'}</td>
+                    <td className="px-3 py-2 text-gray-600 text-xs border-r border-gray-100" style={cw('owner')}>{item.owner || '—'}</td>
+                    <td className="px-3 py-2 text-gray-500 text-xs border-r border-gray-100" style={cw('due_date')}>{item.due_date || '—'}</td>
                     {/* Three-dots */}
                     <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
                       <div className="relative">

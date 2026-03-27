@@ -55,8 +55,11 @@ export default function PeopleTab({ project, canEdit }) {
   async function loadPeople() {
     try {
       const all = await getPeople(project.id);
-      setClientPeople(all.filter(p => p.team === 'Client'));
-      setLeucinePeople(all.filter(p => p.team === 'Leucine'));
+      // Deduplicate by ID in case the DB has duplicate rows
+      const seen = new Set();
+      const unique = all.filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true; });
+      setClientPeople(unique.filter(p => p.team === 'Client'));
+      setLeucinePeople(unique.filter(p => p.team === 'Leucine'));
     } catch (e) {
       toast.error('Failed to load people');
     }

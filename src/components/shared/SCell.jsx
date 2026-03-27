@@ -28,17 +28,27 @@ export function SCell({
 }) {
   const [draft, setDraft] = useState(value ?? '');
   const inputRef = useRef(null);
+  const tdRef    = useRef(null);
   const editing  = ss.isEdit(rowId, colKey) && !disabled;
+  const selected = ss.isSel(rowId, colKey) && !editing;
 
   // Keep draft in sync when external value changes
   useEffect(() => { setDraft(value ?? ''); }, [value]);
 
-  // Auto-focus and select-all when entering edit mode
+  // Auto-focus the input when entering edit mode
   useEffect(() => {
     if (!editing || !inputRef.current) return;
     inputRef.current.focus();
     if (inputRef.current.select) inputRef.current.select();
   }, [editing]);
+
+  // Auto-focus the <td> when cell is selected (not editing) so it
+  // can receive keyboard events (Enter to start editing)
+  useEffect(() => {
+    if (selected && tdRef.current) {
+      tdRef.current.focus({ preventScroll: true });
+    }
+  }, [selected]);
 
   function commit(v) {
     const next = v !== undefined ? v : draft;
@@ -89,9 +99,22 @@ export function SCell({
 
   return (
     <td
+      ref={tdRef}
+      tabIndex={selected ? 0 : -1}
       className={`border-r border-gray-200 cursor-default select-none ${ss.cellCls(rowId, colKey)} ${tdClass}`}
       style={tdStyle}
       onClick={() => !disabled && ss.click(rowId, colKey)}
+      onKeyDown={e => {
+        if (editing) return; // handled by input/select inside
+        if (e.key === 'Enter' && !disabled) {
+          e.preventDefault();
+          ss.click(rowId, colKey); // second click → enters edit
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          ss.keyDown(e, rowId, colKey, rows, cols);
+        } else if (e.key === 'Tab') {
+          ss.keyDown(e, rowId, colKey, rows, cols);
+        }
+      }}
     >
       {editing
         ? <div className="min-h-[24px] flex items-center">{editNode}</div>

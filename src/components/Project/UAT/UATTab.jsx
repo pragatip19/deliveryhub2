@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Plus, MoreVertical, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getUATItems, upsertUATItem, deleteUATItem, getPeople } from '../../../lib/supabase';
+import { getUATItems, upsertUATItem, deleteUATItem } from '../../../lib/supabase';
 import { UAT_STATUS_OPTIONS, UAT_BATCH_STATUS_OPTIONS } from '../../../lib/templates';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useSpreadsheet } from '../../../lib/useSpreadsheet';
@@ -39,7 +39,6 @@ const EDIT_COLS_LOG = ['process', 'status', 'approver', 'paper', 'elim', 'auto',
 export default function UATTab({ project, canEdit }) {
   const { user, isAdmin, isDM } = useAuth();
   const [uatItems, setUatItems] = useState([]);
-  const [people, setPeople]     = useState([]);
   const [loading, setLoading]   = useState(true);
   const [openMenuId, setOpenMenuId] = useState(null);
   const ss = useSpreadsheet();
@@ -115,12 +114,8 @@ export default function UATTab({ project, canEdit }) {
     async function load() {
       try {
         setLoading(true);
-        const [items, peopleList] = await Promise.all([
-          getUATItems(project.id),
-          getPeople(project.id),
-        ]);
+        const items = await getUATItems(project.id);
         setUatItems(items || []);
-        setPeople(peopleList || []);
         const cfg = (items || []).find(i => i.group_name === '__batch_config');
         if (cfg) {
           setBatchCfgId(cfg.id);
@@ -196,6 +191,7 @@ export default function UATTab({ project, canEdit }) {
       process_name: '',
       status: 'Not Started',
       uat_approver_id: null,
+      approver: '',
       sort_order: Date.now(),
       ...(isMES && {
         batch_1_status: 'Not Started',
@@ -381,14 +377,13 @@ export default function UATTab({ project, canEdit }) {
                       disabled={!canEdit} tdStyle={cw('status')}
                       readView={<StatusPill value={item.status} colorMap={STATUS_COLORS} />} />
 
-                    {/* UAT Approver */}
+                    {/* UAT Approver (freetext name) */}
                     <SCell ss={ss} rowId={item.id} colKey="approver"
-                      value={item.uat_approver_id || ''}
-                      onChange={v => handleChange(item.id, 'uat_approver_id', v)}
+                      value={item.approver || ''}
+                      onChange={v => handleChange(item.id, 'approver', v)}
                       rows={visibleItems} cols={editCols}
-                      type="select" options={people.map(p => ({ value: p.id, label: p.name }))}
-                      disabled={!canEdit} tdStyle={cw('approver')}
-                      readView={<span>{people.find(p => p.id === item.uat_approver_id)?.name || '—'}</span>} />
+                      placeholder="Approver name…"
+                      disabled={!canEdit} tdStyle={cw('approver')} />
 
                     {/* Batch statuses (MES only) */}
                     {isMES && [1,2,3].map(n => (
