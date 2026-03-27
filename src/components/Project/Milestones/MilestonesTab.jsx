@@ -1,15 +1,17 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Plus,
   Trash2,
   MoreVertical,
   RefreshCw,
+  GripVertical,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   getMilestones,
   upsertMilestone,
   deleteMilestone,
+  bulkUpsertMilestones,
   getPlanTasks,
 } from '../../../lib/supabase';
 import { formatDate, getWeekNumber } from '../../../lib/workdays';
@@ -86,6 +88,11 @@ const MilestonesTab = ({ project, canEdit }) => {
   const resizingColRef  = useRef(null); // { key, startX, startW }
   const resizingRowRef  = useRef(null); // { startY, startH }
   const resizingWeekRef = useRef(null); // { startX, startW }
+
+  // Drag-and-drop row reordering
+  const [dragIndex, setDragIndex]   = useState(null); // index being dragged
+  const [dragOver, setDragOver]     = useState(null); // index being hovered over
+  const dragNodeRef                 = useRef(null);   // ghost element
 
   // Persist resize to localStorage
   useEffect(() => {
@@ -331,6 +338,57 @@ const MilestonesTab = ({ project, canEdit }) => {
     } finally { setSaving(false); }
   };
 
+  // ─── Drag-and-drop handlers ───────────────────────────────────────────────
+  const handleDragStart = useCallback((e, index) => {
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    // Transparent ghost image
+    const ghost = document.createElement('div');
+    ghost.style.cssText = 'position:fixed;top:-999px;opacity:0';
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, 0, 0);
+    dragNodeRef.current = ghost;
+  }, []);
+
+  const handleDragOver = useCallback((e, index) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOver(index);
+  }, []);
+
+  const handleDrop = useCallback(async (e, dropIndex) => {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === dropIndex) {
+      setDragIndex(null);
+      setDragOver(null);
+      return;
+    }
+    // Reorder milestones array
+    const reordered = [...milestones];
+    const [moved] = reordered.splice(dragIndex, 1);
+    reordered.splice(dropIndex, 0, moved);
+    // Assign new sort_order values
+    const withOrder = reordered.map((m, i) => ({ ...m, sort_order: i + 1 }));
+    setMilestones(withOrder);
+    setDragIndex(null);
+    setDragOver(null);
+    try {
+      await bulkUpsertMilestones(withOrder.map(m => ({ id: m.id, project_id: m.project_id, sort_order: m.sort_order })));
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to save order');
+    }
+  }, [dragIndex, milestones]);
+
+  const handleDragEnd = useCallback(() => {
+    setDragIndex(null);
+    setDragOver(null);
+    if (dragNodeRef.current) {
+      dragNodeRef.current.remove();
+      dragNodeRef.current = null;
+    }
+  }, []);
+
   // ─── Column resize handle ─────────────────────────────────────────────────
   const ResizeHandle = ({ colKey, w }) => (
     <div
@@ -416,7 +474,14 @@ const MilestonesTab = ({ project, canEdit }) => {
                 className="sticky left-0 z-30 flex bg-gray-100 border-r border-gray-300"
                 style={{ position: 'sticky' }}
               >
-                {/* 3-dot column header (first column) */}
+                {/* Drag handle column header */}
+                {canEdit && (
+                  <div
+                    className="flex items-center justify-center border-r border-gray-300"
+                    style={{ width: 24, minWidth: 24 }}
+                  />
+                )}
+                {/* 3-dot column header */}
                 {canEdit && (
                   <div
                     className="flex items-center justify-center border-r border-gray-300"
@@ -522,14 +587,31 @@ const MilestonesTab = ({ project, canEdit }) => {
               milestonesWithDates.map((milestone, index) => (
                 <div
                   key={milestone.id}
-                  className="border-b border-gray-200 flex"
+                  className={`border-b border-gray-200 flex transition-colors ${
+                    dragOver === index && dragIndex !== index ? 'border-t-2 border-t-blue-500 bg-blue-50/30' : ''
+                  } ${dragIndex === index ? 'opacity-50' : ''}`}
                   style={{ height: rowHeight }}
+                  onDragOver={canEdit ? (e) => handleDragOver(e, index) : undefined}
+                  onDrop={canEdit ? (e) => handleDrop(e, index) : undefined}
                 >
                   {/* Frozen row cells — sticky left */}
                   <div
                     className="sticky left-0 z-10 flex bg-white border-r border-gray-300 flex-shrink-0"
                   >
-                    {/* ─── 3-dot Actions Menu (FIRST column) ─── */}
+                    {/* ─── Drag Handle (FIRST column) ─── */}
+                    {canEdit && (
+                      <div
+                        className="relative flex items-center justify-center border-r border-gray-200 flex-shrink-0 cursor-grab active:cursor-grabbing"
+                        style={{ width: 24, minWidth: 24 }}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, index)}
+                        onDragEnd={handleDragEnd}
+                        title="Drag to reorder"
+                      >
+                        <GripVertical className="w-3 h-3 text-gray-300 hover:text-gray-500" />
+                      </div>
+                    )}
+                    {/* ─── 3-dot Actions Menu ─── */}
                     {canEdit && (
                       <div
                         className="relative flex items-center justify-center border-r border-gray-200 flex-shrink-0"
@@ -724,7 +806,7 @@ const MilestonesTab = ({ project, canEdit }) => {
           ))}
         </div>
         <p className="text-xs text-gray-400 mt-2">
-          Drag column header right edge to resize columns · Drag Gantt week header right edge to resize week columns · Drag bottom edge of header row to resize rows
+          Drag ⠿ handle to reorder rows · Drag column header right edge to resize columns · Drag Gantt week header right edge to resize week columns · Drag bottom edge of header row to resize rows
         </p>
       </div>
 
