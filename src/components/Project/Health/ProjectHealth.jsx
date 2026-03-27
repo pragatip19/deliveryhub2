@@ -467,12 +467,15 @@ export default function ProjectHealth({ project, canEdit }) {
                   className="w-28 shrink-0 text-xs px-2 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-700 bg-white"
                 />
                 {/* Impact / Effect */}
-                <input
-                  type="text"
+                <textarea
                   value={action.impact || ''}
                   onChange={e => updateField('impact', e.target.value)}
-                  placeholder="Impact / effect observed…"
-                  className="w-40 shrink-0 text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) e.preventDefault();
+                  }}
+                  placeholder="Impact / effect observed… (Shift+Enter for new line)"
+                  rows={Math.max(1, (action.impact || '').split('\n').length)}
+                  className="w-40 shrink-0 text-xs px-2.5 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-800 placeholder-slate-400 bg-white resize-none overflow-hidden"
                 />
               </div>
             );
