@@ -124,7 +124,7 @@ export default function RaidTable({ project, canEdit, type }) {
 
   function handleAddRow() {
     // Include id so Supabase upsert has a PK to work with
-    const draft = { id: crypto.randomUUID(), title: '', status: 'Open', impact: 'Medium', probability: 'Medium', owner: '', description: '', due_date: '', sort_order: items.length };
+    const draft = { id: crypto.randomUUID(), title: '', status: 'Open', impact: 'Medium', probability: 'Medium', owner: '', description: '', due_date: null, sort_order: items.length };
     save(draft).then(saved => {
       if (saved) {
         setExpandedId(saved.id);
