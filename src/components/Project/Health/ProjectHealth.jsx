@@ -483,11 +483,12 @@ export default function ProjectHealth({ project, canEdit }) {
     </div>{/* end LEFT column */}
 
     {/* ── RIGHT: Today's Activities + Needs Immediate Action stacked, sticky, viewport-height ── */}
-    <div className="w-64 shrink-0 sticky top-4 flex flex-col gap-3" style={{ maxHeight: 'calc(100vh - 5rem)', overflow: 'hidden' }}>
+    {/* Use height (not maxHeight) so that percentage-based flex children resolve correctly */}
+    <div className="w-64 shrink-0 sticky top-4 flex flex-col gap-3" style={{ height: 'calc(100vh - 5rem)' }}>
 
-      {/* Today's Activities */}
-      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex flex-col min-h-0 flex-shrink-0" style={{ maxHeight: '45%' }}>
-        <div className="flex items-center gap-2 mb-2">
+      {/* Today's Activities — capped at 40% of the column height, scrollable inside */}
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex flex-col min-h-0" style={{ flex: '0 0 auto', maxHeight: '40%' }}>
+        <div className="flex items-center gap-2 mb-2 flex-shrink-0">
           <CalendarDays size={14} className="text-blue-500" />
           <h3 className="text-sm font-semibold text-slate-800">Today's Activities</h3>
           {todayTasks.length > 0 && (
@@ -497,7 +498,7 @@ export default function ProjectHealth({ project, canEdit }) {
         {todayTasks.length === 0 ? (
           <p className="text-xs text-slate-400 italic">No activities due today.</p>
         ) : (
-          <div className="space-y-2 overflow-y-auto pr-1 flex-1">
+          <div className="space-y-2 overflow-y-auto pr-1 min-h-0 flex-1">
             {todayTasks.map(t => (
               <div key={t.id} className="bg-white rounded-lg p-2.5 border border-blue-100">
                 <p className="text-xs font-medium text-slate-800 leading-snug">{t.activities}</p>
@@ -508,7 +509,7 @@ export default function ProjectHealth({ project, canEdit }) {
         )}
       </div>
 
-      {/* Needs Immediate Action */}
+      {/* Needs Immediate Action — takes remaining height, scrollable inside */}
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 flex flex-col min-h-0 flex-1">
         <div className="flex items-center gap-2 mb-2">
           <AlertCircle size={14} className="text-red-500" />
@@ -520,10 +521,9 @@ export default function ProjectHealth({ project, canEdit }) {
         {urgentTasks.length === 0 ? (
           <p className="text-xs text-slate-400 italic">No activities need immediate attention.</p>
         ) : (
-          <div className="space-y-2 overflow-y-auto pr-1 flex-1">
+          <div className="space-y-2 overflow-y-auto pr-1 min-h-0 flex-1">
             {urgentTasks.map(t => {
-              // Determine best delay figure to display: prefer recalculated days_delay,
-              // fall back to baseline comparison when cascade pushed planned_end to future
+              // Best delay figure: prefer recalculated days_delay, fall back to baseline diff
               const todayDate = today();
               const baselineEnd = t.baseline_planned_end ? parseDate(t.baseline_planned_end) : null;
               const baselineDelay = baselineEnd && baselineEnd < todayDate
@@ -538,10 +538,10 @@ export default function ProjectHealth({ project, canEdit }) {
                       t.status === 'Not Started' ? 'bg-gray-100 text-gray-600' : 'bg-orange-100 text-orange-700'
                     }`}>{t.status}</span>
                     {displayDelay > 0 && (
-                      <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">+{displayDelay}d</span>
+                      <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">+{displayDelay}d delay</span>
                     )}
-                    {t.baseline_planned_end && (
-                      <span className="text-[10px] text-slate-400">Baseline end {fmtDate(t.baseline_planned_end)}</span>
+                    {t.planned_end && (
+                      <span className="text-[10px] text-slate-400">Due {fmtDate(t.planned_end)}</span>
                     )}
                   </div>
                 </div>
