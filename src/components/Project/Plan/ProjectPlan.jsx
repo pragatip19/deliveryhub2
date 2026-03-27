@@ -42,6 +42,29 @@ const COLUMNS = [
   { key: 'learnings',              label: 'Learnings from Delay', width: 200, frozen: false, type: 'text' },
 ];
 
+// ── Clipboard date parser ─────────────────────────────────────────────────────
+// Handles ISO (YYYY-MM-DD), US (M/D/YYYY), International (D/M/YYYY), and
+// natural-language dates that JS Date can parse (e.g. "Jan 15 2025").
+function parseClipDate(str) {
+  if (!str?.trim()) return '';
+  const s = str.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; // already ISO
+  // Match D/M/YYYY or M/D/YYYY patterns
+  const slash = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (slash) {
+    let [, a, b, y] = slash;
+    if (y.length === 2) y = '20' + y;
+    // If first number > 12, it must be a day → D/M/Y
+    if (parseInt(a) > 12) return `${y}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`;
+    // Otherwise treat as M/D/Y (Google Sheets US locale default)
+    return `${y}-${a.padStart(2,'0')}-${b.padStart(2,'0')}`;
+  }
+  // Fall back to native Date parsing (handles "Jan 15, 2025", RFC 2822, etc.)
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  return s; // return as-is so the cell gets the raw text
+}
+
 // Excel-like background color swatches
 const BG_COLORS = [
   { label: 'Yellow',  hex: '#FEF9C3' },
@@ -64,6 +87,82 @@ const MILESTONE_PALETTE = [
   { bg: 'bg-amber-100',   text: 'text-amber-800',   border: 'border-l-2 border-amber-400',   rowTop: 'border-t-2 border-amber-200',   hex: '#fef3c7' },
   { bg: 'bg-cyan-100',    text: 'text-cyan-800',    border: 'border-l-2 border-cyan-400',    rowTop: 'border-t-2 border-cyan-200',    hex: '#cffafe' },
 ];
+
+// ── Shared multi-cell clipboard paste logic ───────────────────────────────────
+// Called from both the keyboard Ctrl+V handler and the onPaste div event.
+// Parses clipboard text as a TSV grid and writes values into the task array
+// starting at `selectedCell`, going right across columns and down across rows.
+// Pure-computed fields (delay_status, days_delay, etc.) are skipped.
+function applyClipboardPaste(clipText, selectedCell, tasks, sortedTasks, colOrder, visibleCols, setTasks, pushHistory, debouncedSave, handleCellChange) {
+  if (!clipText || !selectedCell) return;
+
+  // Split into rows/cols; strip trailing empty line that clipboard often adds
+  const rawRows = clipText.split('\n');
+  while (rawRows.length && !rawRows[rawRows.length - 1].trim()) rawRows.pop();
+  if (!rawRows.length) return;
+  const clipGrid = rawRows.map(r => r.split('\t'));
+
+  // Single cell (single value, no tabs/newlines) → fast path
+  if (clipGrid.length === 1 && clipGrid[0].length === 1) {
+    handleCellChange(selectedCell.taskId, selectedCell.col, clipGrid[0][0].trim());
+    toast.success('Pasted', { duration: 1200 });
+    return;
+  }
+
+  // Build ordered list of currently visible columns
+  const orderedCols = colOrder
+    .map(k => COLUMNS.find(c => c.key === k))
+    .filter(c => c && visibleCols[c.key]);
+  const anchorColIdx = orderedCols.findIndex(c => c.key === selectedCell.col);
+  if (anchorColIdx === -1) return;
+
+  // Locate anchor row in sorted order
+  const anchorRowIdx = sortedTasks.findIndex(t => t.id === selectedCell.taskId);
+  if (anchorRowIdx === -1) return;
+
+  // Fields whose values are computed/derived (never written via paste)
+  const SKIP = new Set(['delay_status', 'days_delay', 'baseline_delta', 'planned_end', 'no_of_days_delay', 'delay_on_track']);
+
+  // Apply all changes in one batch
+  const next = tasks.map(t => ({ ...t }));
+  let count = 0;
+
+  clipGrid.forEach((clipRow, ri) => {
+    const targetTask = sortedTasks[anchorRowIdx + ri];
+    if (!targetTask) return; // pasting beyond last row
+    const taskIdx = next.findIndex(t => t.id === targetTask.id);
+    if (taskIdx === -1) return;
+
+    clipRow.forEach((rawVal, ci) => {
+      const col = orderedCols[anchorColIdx + ci];
+      if (!col) return; // pasting beyond rightmost visible column
+      if (SKIP.has(col.key)) return;
+      // anchorOnly column (planned_start) only writable for the first task
+      if (col.anchorOnly && next[taskIdx].sort_order !== 0) return;
+
+      let val = rawVal.trim();
+      if (col.type === 'date' && val)   val = parseClipDate(val);
+      if (col.type === 'number' && val) { const n = parseFloat(val); val = isNaN(n) ? 0 : n; }
+
+      next[taskIdx][col.key] = val;
+      count++;
+    });
+  });
+
+  if (!count) {
+    toast.error('Nothing pasted — cells are read-only or outside the grid');
+    return;
+  }
+
+  const recalced = recalculatePlan(next);
+  setTasks(recalced);
+  pushHistory(recalced);
+  debouncedSave(recalced);
+
+  const cols = clipGrid[0].length;
+  const rows = clipGrid.length;
+  toast.success(`Pasted ${rows} row${rows > 1 ? 's' : ''} × ${cols} column${cols > 1 ? 's' : ''} (${count} cell${count > 1 ? 's' : ''})`);
+}
 
 const ProjectPlan = ({ project, canEdit }) => {
   const { isAdmin: isAdminFn } = useAuth();
@@ -135,6 +234,13 @@ const ProjectPlan = ({ project, canEdit }) => {
   // Track whether the drag started from the grip handle (onDragStart e.target
   // is always the <tr>, not the child that was mousedown'd).
   const dragFromHandleRef = useRef(false);
+
+  // Keep refs for values used in keyboard handler (avoids stale-closure issues
+  // when multi-cell paste needs current column order / visibility).
+  const colOrderRef     = useRef(colOrder);
+  const visibleColsRef  = useRef(visibleCols);
+  useEffect(() => { colOrderRef.current    = colOrder;    }, [colOrder]);
+  useEffect(() => { visibleColsRef.current = visibleCols; }, [visibleCols]);
 
   // Persist column order + widths to localStorage whenever they change
   useEffect(() => {
@@ -267,7 +373,8 @@ const ProjectPlan = ({ project, canEdit }) => {
         if (ctrl && e.key === 'v') {
           e.preventDefault();
           navigator.clipboard.readText().then(text => {
-            if (text !== undefined) handleCellChange(selectedCell.taskId, selectedCell.col, text.trim());
+            if (!text) return;
+            applyClipboardPaste(text, selectedCell, tasks, sortedTasksRef.current, colOrderRef.current, visibleColsRef.current, setTasks, pushHistory, debouncedSave, handleCellChange);
           }).catch(() => {});
           return;
         }
@@ -577,11 +684,24 @@ const ProjectPlan = ({ project, canEdit }) => {
     toast('Baseline unlocked');
   };
 
-  // ── Paste rows from Excel ─────────────────────────────────────────────────────
+  // ── Paste handler (onPaste event on the scroll div) ──────────────────────────
+  // • If a cell is selected → multi-cell paste starting from that anchor cell
+  // • If no cell is selected → legacy "append rows" behaviour (for pasting whole
+  //   new rows from another spreadsheet)
   const handlePaste = (e) => {
     if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT') return;
     e.preventDefault();
-    const rows = e.clipboardData.getData('text/plain').split('\n').filter(r => r.trim());
+    const text = e.clipboardData.getData('text/plain');
+    if (!text) return;
+
+    if (selectedCell) {
+      // Delegate to the shared multi-cell paste helper
+      applyClipboardPaste(text, selectedCell, tasks, sortedTasksRef.current, colOrderRef.current, visibleColsRef.current, setTasks, pushHistory, debouncedSave, handleCellChange);
+      return;
+    }
+
+    // No cell selected → append new rows (legacy behaviour)
+    const rows = text.split('\n').filter(r => r.trim());
     if (!rows.length) return;
     const newObjs = rows.map((row, i) => {
       const v = row.split('\t');
