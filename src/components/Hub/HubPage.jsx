@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Search, Plus, MoreVertical, Filter, ArrowUpDown, X, ChevronDown, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, MoreVertical, Filter, ArrowUpDown, X, ChevronDown, AlertCircle, CheckCircle2, Copy } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { getProjects, getMyProjects, updateProject, deleteProject, getAllProfiles, getCategories, getPlanTasks } from '../../lib/supabase';
+import { getProjects, getMyProjects, updateProject, deleteProject, duplicateProject, getAllProfiles, getCategories, getPlanTasks } from '../../lib/supabase';
 import { addWorkdays, networkdays } from '../../lib/workdays';
 import { calcSOWCompletion, getKickoffDate, getProjectedGoLive, recalculatePlan } from '../../lib/calculations';
 import NewProjectModal from './NewProjectModal';
@@ -145,7 +145,7 @@ function EditProjectModal({ project, onClose, onSaved, dmProfiles, categories, c
 }
 
 // ── Project Card ──────────────────────────────────────────────
-function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate }) {
+function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onDuplicate, onNavigate }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const [sowData, setSowData]               = useState(null);
@@ -224,10 +224,14 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onNavigate
               <MoreVertical size={16} />
             </button>
             {menuOpen && (
-              <div className="absolute right-0 top-8 bg-white border border-slate-200 rounded-xl shadow-lg z-20 w-44 py-1">
+              <div className="absolute right-0 top-8 bg-white border border-slate-200 rounded-xl shadow-lg z-20 w-48 py-1">
                 <button onClick={() => { setMenuOpen(false); onEdit(project); }}
                   className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
                   Edit Project
+                </button>
+                <button onClick={() => { setMenuOpen(false); onDuplicate(project); }}
+                  className="flex items-center gap-2 w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                  <Copy size={13} className="text-slate-400" /> Duplicate Project
                 </button>
                 {canDelete && (
                   <button onClick={() => { setMenuOpen(false); onDelete(project); }}
@@ -311,6 +315,20 @@ export default function HubPage() {
       toast.success('Project deleted');
       loadAll();
     } catch { toast.error('Failed to delete project'); }
+  }
+
+  async function handleDuplicateProject(project) {
+    const suggestedName = `Copy of ${project.name}`;
+    const newName = window.prompt('Name for the duplicate project:', suggestedName);
+    if (!newName?.trim()) return;
+    const toastId = toast.loading('Duplicating project…');
+    try {
+      await duplicateProject(project.id, newName.trim());
+      toast.success('Project duplicated!', { id: toastId });
+      loadAll();
+    } catch (e) {
+      toast.error('Failed to duplicate: ' + (e?.message || ''), { id: toastId });
+    }
   }
   const [dmProfiles, setDmProfiles] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -518,6 +536,7 @@ export default function HubPage() {
               canDelete={isAdmin()}
               onEdit={setEditProject}
               onDelete={handleDeleteProject}
+              onDuplicate={handleDuplicateProject}
               onNavigate={id => navigate(`/project/${id}`)}
             />
           ))}

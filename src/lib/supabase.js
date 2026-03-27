@@ -152,6 +152,93 @@ export async function deleteProject(projectId) {
   if (error) throw error;
 }
 
+// Deep-copy a project and all its child data (milestones, plan, SOW, payments, people, UAT, RAID, feedback)
+export async function duplicateProject(sourceProjectId, newName) {
+  // 1. Fetch source project
+  const { data: src, error: srcErr } = await supabase
+    .from('projects').select('*').eq('id', sourceProjectId).single();
+  if (srcErr) throw srcErr;
+
+  // 2. Create new project (strip identity / date fields that should be fresh)
+  const { id: _id, created_at, updated_at, kickoff_date, projected_go_live,
+          planned_go_live, ...projectFields } = src;
+  const newProject = await createProject({ ...projectFields, name: newName });
+  const newId = newProject.id;
+
+  // 3. Helper — re-ID an array of rows and point them at the new project
+  function reId(rows, extraMap = {}) {
+    return rows.map(r => {
+      const { id, project_id, created_at, updated_at, ...rest } = r;
+      return { id: crypto.randomUUID(), project_id: newId, ...rest, ...extraMap(r) };
+    });
+  }
+
+  // 4. Fetch all child data in parallel
+  const [milestones, tasks, sowItems, sowOpts, payments, people, uatItems, raidItems, feedbackItems] =
+    await Promise.all([
+      supabase.from('milestones').select('*').eq('project_id', sourceProjectId).order('sort_order'),
+      supabase.from('project_plan').select('*').eq('project_id', sourceProjectId).order('sort_order'),
+      supabase.from('sow_items').select('*').eq('project_id', sourceProjectId).order('sort_order'),
+      supabase.from('sow_dropdown_options').select('*').eq('project_id', sourceProjectId),
+      supabase.from('payments').select('*').eq('project_id', sourceProjectId).order('sort_order'),
+      supabase.from('people').select('*').eq('project_id', sourceProjectId),
+      supabase.from('uat_items').select('*').eq('project_id', sourceProjectId).order('sort_order'),
+      supabase.from('raid_items').select('*').eq('project_id', sourceProjectId).order('sort_order'),
+      supabase.from('feedback_items').select('*').eq('project_id', sourceProjectId).order('sort_order'),
+    ]);
+
+  // 5. Build old→new milestone ID map (plan tasks reference milestones by UUID)
+  const msRows   = milestones.data || [];
+  const msIdMap  = {};   // oldId → newId
+  const newMsRows = msRows.map(r => {
+    const newMsId = crypto.randomUUID();
+    msIdMap[r.id] = newMsId;
+    const { id, project_id, created_at, updated_at, ...rest } = r;
+    return { id: newMsId, project_id: newId, ...rest };
+  });
+
+  // 6. Copy tasks — remap milestone FK
+  const taskRows = (tasks.data || []).map(r => {
+    const { id, project_id, created_at, updated_at, ...rest } = r;
+    return {
+      id: crypto.randomUUID(),
+      project_id: newId,
+      ...rest,
+      // remap milestone field: if it's a known old milestone UUID, replace with new UUID
+      milestone: msIdMap[rest.milestone] ?? rest.milestone,
+    };
+  });
+
+  // 7. Payments — strip 'milestone' text field that doesn't exist in DB
+  const paymentRows = (payments.data || []).map(r => {
+    const { id, project_id, created_at, updated_at, milestone, ...rest } = r;
+    return { id: crypto.randomUUID(), project_id: newId, ...rest };
+  });
+
+  // 8. Simple re-ID for the rest
+  const simpleReId = (rows) => rows.map(r => {
+    const { id, project_id, created_at, updated_at, ...rest } = r;
+    return { id: crypto.randomUUID(), project_id: newId, ...rest };
+  });
+
+  // 9. Insert everything in parallel (skip empty arrays)
+  await Promise.all([
+    newMsRows.length    ? supabase.from('milestones').insert(newMsRows) : null,
+    taskRows.length     ? supabase.from('project_plan').insert(taskRows) : null,
+    (sowItems.data || []).length ? supabase.from('sow_items').insert(simpleReId(sowItems.data)) : null,
+    (sowOpts.data || []).length  ? supabase.from('sow_dropdown_options').insert(
+        (sowOpts.data).map(r => { const { id, project_id, created_at, updated_at, ...rest } = r; return { project_id: newId, ...rest }; })
+      ) : null,
+    paymentRows.length  ? supabase.from('payments').insert(paymentRows) : null,
+    (people.data || []).length   ? supabase.from('people').insert(simpleReId(people.data)) : null,
+    (uatItems.data || []).length ? supabase.from('uat_items').insert(simpleReId(uatItems.data)) : null,
+    (raidItems.data || []).length ? supabase.from('raid_items').insert(simpleReId(raidItems.data)) : null,
+    (feedbackItems.data || []).length ? supabase.from('feedback_items').insert(simpleReId(feedbackItems.data)) : null,
+  ].filter(Boolean));
+
+  return newProject;
+}
+
 // ============================================================
 // PROJECT ACCESS
 // ============================================================
@@ -366,7 +453,9 @@ export async function upsertPayment(projectIdOrObj, item) {
   } else {
     payment = { ...item, project_id: projectIdOrObj };
   }
-  const { data, error } = await supabase.from('payments').upsert(payment).select().single();
+  // Strip 'milestone' — that column doesn't exist in the payments DB table (PGRST204)
+  const { milestone: _milestone, ...paymentToSave } = payment;
+  const { data, error } = await supabase.from('payments').upsert(paymentToSave).select().single();
   if (error) throw error;
   return data;
 }
@@ -466,7 +555,9 @@ export async function upsertUATItem(projectIdOrObj, item) {
   } else {
     uatItem = { ...item, project_id: projectIdOrObj };
   }
-  const { data, error } = await supabase.from('uat_items').upsert(uatItem).select().single();
+  // Strip columns that don't exist in the uat_items DB table (PGRST204)
+  const { approver: _a, uat_approver_id: _uid, ...uatToSave } = uatItem;
+  const { data, error } = await supabase.from('uat_items').upsert(uatToSave).select().single();
   if (error) throw error;
   return data;
 }
@@ -488,7 +579,9 @@ export async function getRaidItems(projectId, type) {
 }
 
 export async function upsertRaidItem(item) {
-  const { data, error } = await supabase.from('raid_items').upsert(item).select().single();
+  // Strip 'description' — may not exist in the raid_items DB schema (PGRST204)
+  const { description: _desc, ...raidItem } = item;
+  const { data, error } = await supabase.from('raid_items').upsert(raidItem).select().single();
   if (error) throw error;
   return data;
 }

@@ -110,7 +110,7 @@ export default function RaidTable({ project, canEdit, type }) {
         ? prev.map(i => i.id === saved.id ? saved : i)
         : [...prev, saved]);
       return saved;
-    } catch { toast.error('Failed to save'); }
+    } catch (e) { toast.error('Failed to save: ' + (e?.message || String(e))); }
   }
 
   async function remove(id) {
@@ -123,7 +123,8 @@ export default function RaidTable({ project, canEdit, type }) {
   }
 
   function handleAddRow() {
-    const draft = { title: '', status: 'Open', impact: 'Medium', probability: 'Medium', owner: '', description: '', due_date: '', sort_order: items.length };
+    // Include id so Supabase upsert has a PK to work with
+    const draft = { id: crypto.randomUUID(), title: '', status: 'Open', impact: 'Medium', probability: 'Medium', owner: '', description: '', due_date: '', sort_order: items.length };
     save(draft).then(saved => {
       if (saved) {
         setExpandedId(saved.id);
