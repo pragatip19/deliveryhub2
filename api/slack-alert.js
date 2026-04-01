@@ -86,7 +86,7 @@ export default async function handler(req, res) {
       const uatItems = await sbGet(
         `uat_items?select=process_name,status,updated_at` +
         `&project_id=eq.${proj.id}` +
-        `&status=not.in.(Approved,Done,Not%20Applicable)`
+        `&status=not.in.(UAT%20Complete,Signed%20Off)`
       );
       if (uatItems.length > 0) {
         const lastUpd = uatItems.map(t => t.updated_at).filter(Boolean).sort().pop();
