@@ -113,7 +113,7 @@ export default async function handler(req, res) {
   if (!SUPABASE_URL || !SUPABASE_KEY) return res.status(500).json({ error: 'Supabase env vars not set' });
 
   try {
-    const projects = await sbGet('projects?select=id,name,dm_id,category_name,target_sow_completion_days');
+    const projects = await sbGet('projects?select=id,name,dm_id,target_sow_completion_days,categories(name)');
     const profiles = await sbGet('profiles?select=id,email,full_name');
     const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
 
@@ -131,7 +131,8 @@ export default async function handler(req, res) {
         `&project_id=eq.${proj.id}`
       );
 
-      const targetDays = proj.target_sow_completion_days || getCategoryTargetDays(proj.category_name);
+      const categoryName = proj.categories?.name || '';
+      const targetDays = proj.target_sow_completion_days || getCategoryTargetDays(categoryName);
       const sow = calcSOWCompletion(tasks, targetDays);
 
       if (!sow) { log.push(`${proj.name}: no eligible tasks`); continue; }
