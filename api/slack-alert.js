@@ -2,7 +2,8 @@
 // Triggered by Vercel cron at 17:30 UTC (23:00 IST) daily
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY;
+// Use service role key to bypass RLS in serverless context
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 const WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 const DM_SLACK_IDS = JSON.parse(process.env.SLACK_DM_IDS || '{}');
 
