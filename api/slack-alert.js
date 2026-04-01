@@ -1,12 +1,13 @@
 // Vercel Serverless Function — Daily Slack alert when project SOW % is behind
-// Cron: 0 16 * * * (16:00 UTC = 21:30 IST)
+// Cron: 15 10 * * * (10:15 UTC = 15:45 IST)
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 const WEBHOOK_URL  = process.env.SLACK_WEBHOOK_URL;
 const DM_SLACK_IDS = JSON.parse(process.env.SLACK_DM_IDS || '{}');
+const APP_URL      = 'https://deliveryhub2-igqt.vercel.app';
 
-// ── Helpers (replicated from calculations.js / workdays.js) ──────────────────
+// ── Date helpers ─────────────────────────────────────────────────────────────
 
 function isWeekend(d) { const day = d.getDay(); return day === 0 || day === 6; }
 
@@ -14,6 +15,7 @@ function networkdays(start, end) {
   let count = 0;
   const cur = new Date(start); cur.setHours(0,0,0,0);
   const fin = new Date(end);   fin.setHours(0,0,0,0);
+  if (cur > fin) return 0;
   while (cur <= fin) { if (!isWeekend(cur)) count++; cur.setDate(cur.getDate() + 1); }
   return count;
 }
@@ -33,6 +35,23 @@ function parseDate(str) {
   return isNaN(dt.getTime()) ? null : dt;
 }
 
+function fmtDate(str) {
+  const d = parseDate(str);
+  if (!d) return '—';
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function todayDate() {
+  const d = new Date(); d.setHours(0,0,0,0); return d;
+}
+
+function daysFromToday(dateStr) {
+  const d = parseDate(dateStr);
+  if (!d) return null;
+  const today = todayDate();
+  return Math.ceil((d.getTime() - today.getTime()) / 86400000);
+}
+
 function getCategoryTargetDays(categoryName) {
   if (!categoryName) return 72;
   const n = categoryName.toLowerCase();
@@ -41,8 +60,26 @@ function getCategoryTargetDays(categoryName) {
   return 72;
 }
 
+// Replicates getKickoffDate from calculations.js
+function getKickoffDate(tasks) {
+  const t = tasks.find(t =>
+    t.activities?.toLowerCase().includes('conduct kick-off call') ||
+    t.activities?.toLowerCase().includes('conduct kickoff call') ||
+    t.activities?.toLowerCase().includes('kick-off call')
+  );
+  return t?.actual_start || null;
+}
+
+// Replicates getProjectedGoLive from calculations.js
+function getProjectedGoLive(tasks) {
+  const t = tasks.find(t => t.activities?.toLowerCase().includes('release system'));
+  return t?.planned_end || null;
+}
+
+// ── SOW Completion (matches UI logic exactly) ─────────────────────────────────
+
 function calcSOWCompletion(tasks, targetDays) {
-  const todayDate = new Date(); todayDate.setHours(0,0,0,0);
+  const today = todayDate();
 
   const eligible = tasks.filter(t => {
     if (!t.planned_start || !t.planned_end) return false;
@@ -63,8 +100,16 @@ function calcSOWCompletion(tasks, targetDays) {
   if (totalDays === 0) return null;
 
   const projectDays = getWorkingDaysList(projectStart, projectEnd);
-  const stamped = eligible.map(t => ({ ...t, _s: parseDate(t.planned_start).setHours(0,0,0,0), _e: parseDate(t.planned_end).setHours(0,0,0,0) }));
-  const weights = {}; eligible.forEach(t => { weights[t.id] = 0; });
+
+  // Store timestamps for comparison
+  const stamped = eligible.map(t => {
+    const s = parseDate(t.planned_start); s.setHours(0,0,0,0);
+    const e = parseDate(t.planned_end);   e.setHours(0,0,0,0);
+    return { ...t, _s: s.getTime(), _e: e.getTime() };
+  });
+
+  const weights = {};
+  eligible.forEach(t => { weights[t.id] = 0; });
 
   for (const day of projectDays) {
     const ts = day.getTime();
@@ -74,24 +119,25 @@ function calcSOWCompletion(tasks, targetDays) {
     active.forEach(t => { weights[t.id] += share; });
   }
 
-  const currentFrac = eligible.filter(t => t.status === 'Done').reduce((sum, t) => sum + weights[t.id], 0);
+  const currentFrac = eligible
+    .filter(t => t.status === 'Done')
+    .reduce((sum, t) => sum + weights[t.id], 0);
 
   let expectedFrac;
-  if (todayDate < projectStart) {
+  const todayNorm = new Date(today);
+  if (todayNorm < projectStart) {
     expectedFrac = 0;
   } else {
-    const elapsed = networkdays(projectStart, todayDate);
-    expectedFrac  = elapsed / totalDays;
+    expectedFrac = networkdays(projectStart, todayNorm) / totalDays;
   }
 
   const current  = Math.min(100, currentFrac  * 100);
   const expected = Math.min(100, expectedFrac * 100);
-  const delta    = current - expected; // negative = behind
+  const delta    = current - expected;
 
   return {
-    current:  Math.round(current  * 10) / 10,
-    expected: Math.round(expected * 10) / 10,
-    delta:    Math.round(delta    * 10) / 10,
+    current:   Math.round(current  * 10) / 10,
+    expected:  Math.round(expected * 10) / 10,
     behindPct: Math.round(Math.max(0, -delta) * 10) / 10,
   };
 }
@@ -109,68 +155,130 @@ async function sbGet(path) {
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
-  if (!WEBHOOK_URL)            return res.status(500).json({ error: 'SLACK_WEBHOOK_URL not set' });
+  if (!WEBHOOK_URL)                   return res.status(500).json({ error: 'SLACK_WEBHOOK_URL not set' });
   if (!SUPABASE_URL || !SUPABASE_KEY) return res.status(500).json({ error: 'Supabase env vars not set' });
 
   try {
-    const projects = await sbGet('projects?select=id,name,dm_id,target_sow_completion_days,categories(name)');
+    const projects = await sbGet(
+      'projects?select=id,name,dm_id,kickoff_date,planned_go_live,projected_go_live,target_sow_completion_days,categories(name)'
+    );
     const profiles = await sbGet('profiles?select=id,email,full_name');
     const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
 
-    const log = [`${projects.length} projects, ${profiles.length} profiles loaded`];
+    const log  = [`${projects.length} projects, ${profiles.length} profiles loaded`];
     const sent = [];
+    const today = todayDate();
 
     for (const proj of projects) {
-      if (!proj.dm_id) continue;
-      const dm = profileMap[proj.dm_id];
-      if (!dm) continue;
+      const dm = proj.dm_id ? profileMap[proj.dm_id] : null;
 
-      // Fetch plan tasks for this project
+      // Fetch plan tasks
       const tasks = await sbGet(
-        `project_plan?select=id,activities,planned_start,planned_end,status` +
+        `project_plan?select=id,activities,planned_start,planned_end,actual_start,status` +
         `&project_id=eq.${proj.id}`
       );
 
+      // Derive kickoff and projected go-live exactly as the UI does
+      const kickoffStr    = proj.kickoff_date || getKickoffDate(tasks);
+      const projGoLiveStr = getProjectedGoLive(tasks) || proj.projected_go_live;
+      const kickoff    = parseDate(kickoffStr);
+      const projGoLive = parseDate(projGoLiveStr);
+
       const categoryName = proj.categories?.name || '';
-      const targetDays = proj.target_sow_completion_days || getCategoryTargetDays(categoryName);
+      const targetDays = proj.target_sow_completion_days ||
+        (kickoff && projGoLive ? Math.max(1, networkdays(kickoff, projGoLive)) : getCategoryTargetDays(categoryName));
+
       const sow = calcSOWCompletion(tasks, targetDays);
 
-      if (!sow) { log.push(`${proj.name}: no eligible tasks`); continue; }
+      if (!sow) { log.push(`${proj.name}: no eligible tasks — skipped`); continue; }
 
-      log.push(`${proj.name}: ${sow.current}% current, ${sow.expected}% expected, ${sow.behindPct}% behind`);
+      log.push(`${proj.name}: ${sow.current}% actual, ${sow.expected}% expected, ${sow.behindPct}% behind`);
 
-      // Alert if >10% behind, stop alerting if <5% behind
-      if (sow.behindPct < 5) { log.push(`  → within threshold, no alert`); continue; }
-      if (sow.behindPct <= 10) { log.push(`  → between 5-10%, no alert`); continue; }
+      // Only alert if >10% behind
+      if (sow.behindPct <= 10) { log.push(`  → within threshold, no alert`); continue; }
 
-      const slackId = DM_SLACK_IDS[dm.email];
-      const mention = slackId ? `<@${slackId}>` : dm.full_name;
+      // Fetch payments due within 5 days (not yet paid)
+      const payments = await sbGet(
+        `payments?select=line_item,payment_status,planned_date` +
+        `&project_id=eq.${proj.id}` +
+        `&payment_status=in.(Not%20Paid,Invoice%20Sent,Project%20Pending)`
+      );
+      const upcomingPayments = payments.filter(p => {
+        const days = daysFromToday(p.planned_date);
+        return days !== null && days >= 0 && days <= 5;
+      });
 
+      // Go-live date to display
+      const goLiveDisplay = fmtDate(projGoLiveStr || proj.planned_go_live);
+
+      // DM mention
+      const slackId  = dm ? DM_SLACK_IDS[dm.email] : null;
+      const dmName   = dm?.full_name || 'Delivery Manager';
+      const mention  = slackId ? `<@${slackId}>` : `*${dmName}*`;
+
+      // Build Slack blocks
       const blocks = [
-        { type: 'header', text: { type: 'plain_text', text: `🚨 Project Delayed: ${proj.name}`, emoji: true } },
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: `🚨 Project Delayed: ${proj.name}`, emoji: true },
+        },
+        {
+          type: 'section',
+          fields: [
+            { type: 'mrkdwn', text: `*DM*\n${mention}` },
+            { type: 'mrkdwn', text: `*Go-Live Date*\n📅 ${goLiveDisplay}` },
+          ],
+        },
         {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `Hi ${mention}! 👋 Your project *${proj.name}* is *${sow.behindPct}% behind schedule*.\n\n` +
-              `• Expected completion: *${sow.expected}%*\n` +
-              `• Actual completion: *${sow.current}%*\n\n` +
-              `Please review the project plan and update task statuses.`,
+            text: `📉 *Schedule Status:* This project is *${sow.behindPct}% behind schedule.*`,
           },
         },
-        {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: `Delivery Hub · <https://deliveryhub2-igqt.vercel.app|Open App> · This alert repeats daily until delay drops below 5%` }],
-        },
       ];
+
+      // Upcoming payment milestones
+      if (upcomingPayments.length > 0) {
+        const payLines = upcomingPayments.map(p => {
+          const days = daysFromToday(p.planned_date);
+          const urgency = days === 0 ? 'due *today*' : `due in *${days} day${days === 1 ? '' : 's'}* (${fmtDate(p.planned_date)})`;
+          return `• ${p.line_item || 'Payment milestone'} — ${urgency}`;
+        }).join('\n');
+
+        blocks.push({ type: 'divider' });
+        blocks.push({
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `💳 *Upcoming Payment Milestones:*\n${payLines}\n\n_If you're unable to meet a date, please update the planned milestone completion date in the app._`,
+          },
+        });
+      }
+
+      blocks.push({ type: 'divider' });
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `Please review and update the project plan to reflect the latest progress.\n👉 <${APP_URL}/project/${proj.id}|Open ${proj.name} in Delivery Hub>`,
+        },
+      });
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `Delivery Hub · Auto-check daily · Alert stops when delay drops below 5%` }],
+      });
 
       const slackRes = await fetch(WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: `🚨 ${proj.name} is ${sow.behindPct}% behind schedule`, blocks }),
+        body: JSON.stringify({
+          text: `🚨 ${proj.name} is ${sow.behindPct}% behind schedule (DM: ${dmName})`,
+          blocks,
+        }),
       });
 
-      if (slackRes.ok) sent.push(`${proj.name} (${sow.behindPct}% behind) → ${dm.email}`);
+      if (slackRes.ok) sent.push(`${proj.name} (${sow.behindPct}% behind)`);
       else log.push(`❌ Slack post failed for ${proj.name}: ${slackRes.status}`);
     }
 
@@ -179,6 +287,7 @@ export default async function handler(req, res) {
       sent,
       log,
     });
+
   } catch (err) {
     console.error('slack-alert error:', err);
     return res.status(500).json({ error: err.message });
