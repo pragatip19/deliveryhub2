@@ -508,7 +508,7 @@ export async function getAllPayments() {
       project_name: proj.name || '',
       category_name: catMap[proj.category_id] || '',
       dm_name: profileMap[proj.dm_id]?.full_name || '',
-      go_live_date: proj.planned_go_live,
+      go_live_date: proj.planned_go_live || '',
       project_link: `/project/${p.project_id}`,
     };
   });

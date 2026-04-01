@@ -32,6 +32,10 @@ export default function LoginPage() {
         navigate('/');
       } else {
         if (!name.trim()) { toast.error('Please enter your full name.'); setLoading(false); return; }
+        if (password.length < 8)              { toast.error('Password must be at least 8 characters.'); setLoading(false); return; }
+        if (!/[A-Z]/.test(password))          { toast.error('Password must contain at least one uppercase letter.'); setLoading(false); return; }
+        if (!/[0-9]/.test(password))          { toast.error('Password must contain at least one number.'); setLoading(false); return; }
+        if (!/[^A-Za-z0-9]/.test(password))  { toast.error('Password must contain at least one special character.'); setLoading(false); return; }
         const { data, error } = await signUp(email.trim(), name.trim(), password);
         if (error) throw error;
         if (data?.user && !data.session) {
@@ -107,6 +111,7 @@ export default function LoginPage() {
               placeholder="••••••••"
               required
               minLength={8}
+              title="Min 8 characters, one uppercase, one number, one special character"
             />
           </div>
 
