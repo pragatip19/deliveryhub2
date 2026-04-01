@@ -161,9 +161,9 @@ export function calcDaysDelay(task) {
     // ORIGINAL plan — not the cascaded planned_end (which moves to today/future
     // when a predecessor is overdue, making the delay appear as 0).
     // Falls back to planned_end for tasks that have no baseline yet.
-    const baselineEnd = parseDate(task.baseline_planned_end);
-    const reference = (baselineEnd && baselineEnd < (plannedEnd || todayDate))
-      ? baselineEnd
+    const baselineEndRef = parseDate(task.baseline_planned_end);
+    const reference = (baselineEndRef && baselineEndRef < (plannedEnd || todayDate))
+      ? baselineEndRef
       : plannedEnd;
     if (!reference) return 0;
     if (todayDate <= reference) return 0;
