@@ -51,7 +51,11 @@ export default async function handler(req, res) {
 
     const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
     const alerts = [];
-    const log = [];
+    const log = [
+      `DEBUG: ${projects.length} projects fetched`,
+      `DEBUG: ${profiles.length} profiles fetched`,
+      `DEBUG: using key type = ${process.env.SUPABASE_SERVICE_ROLE_KEY ? 'service_role' : 'anon'}`,
+    ];
 
     for (const proj of projects) {
       if (!proj.dm_id) continue;
