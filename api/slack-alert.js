@@ -172,26 +172,27 @@ export default async function handler(req, res) {
     for (const proj of projects) {
       const dm = proj.dm_id ? profileMap[proj.dm_id] : null;
 
-      // Use SOW values stored by the Health page — single source of truth, no recomputation
-      if (proj.sow_behind_pct === null || proj.sow_behind_pct === undefined) {
-        log.push(`${proj.name}: no SOW data yet — open the project in the app first`);
-        continue;
-      }
-
-      const sow = {
-        current:   proj.sow_current_pct,
-        expected:  proj.sow_expected_pct,
-        behindPct: proj.sow_behind_pct,
-      };
-
-      // Fetch tasks only to derive projected go-live date for display
+      // Fetch tasks — needed for go-live display and as fallback for SOW if stored values are missing
       const tasks = await sbGet(
-        `project_plan?select=activities,planned_end` +
+        `project_plan?select=id,activities,planned_start,planned_end,actual_start,status` +
         `&project_id=eq.${proj.id}`
       );
       const projGoLiveStr = getProjectedGoLive(tasks) || proj.projected_go_live;
 
-      log.push(`${proj.name}: ${sow.current}% actual, ${sow.expected}% expected, ${sow.behindPct}% behind (stored ${proj.sow_computed_at?.slice(0,10) || '?'})`);
+      // Use stored SOW values if available (written by Health page), otherwise compute inline
+      let sow;
+      if (proj.sow_behind_pct !== null && proj.sow_behind_pct !== undefined) {
+        sow = {
+          current:   proj.sow_current_pct,
+          expected:  proj.sow_expected_pct,
+          behindPct: proj.sow_behind_pct,
+        };
+        log.push(`${proj.name}: ${sow.current}% actual, ${sow.expected}% expected, ${sow.behindPct}% behind (stored)`);
+      } else {
+        sow = calcSOWCompletion(tasks, null);
+        if (!sow) { log.push(`${proj.name}: no eligible tasks — skipped`); continue; }
+        log.push(`${proj.name}: ${sow.current}% actual, ${sow.expected}% expected, ${sow.behindPct}% behind (computed)`);
+      }
 
       // Only alert if >10% behind
       if (sow.behindPct <= 10) { log.push(`  → within threshold, no alert`); continue; }
