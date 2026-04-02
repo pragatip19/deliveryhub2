@@ -208,12 +208,12 @@ export default async function handler(req, res) {
 
       // Fetch payments due within 5 days (not yet paid)
       const payments = await sbGet(
-        `payments?select=line_item,payment_status,planned_date` +
+        `payments?select=line_item,payment_status,planned_milestone_completion_date` +
         `&project_id=eq.${proj.id}` +
         `&payment_status=in.(Not%20Paid,Invoice%20Sent,Project%20Pending)`
       );
       const upcomingPayments = payments.filter(p => {
-        const days = daysFromToday(p.planned_date);
+        const days = daysFromToday(p.planned_milestone_completion_date);
         return days !== null && days >= 0 && days <= 5;
       });
 
@@ -264,8 +264,8 @@ export default async function handler(req, res) {
       // Upcoming payment milestones
       if (upcomingPayments.length > 0) {
         const payLines = upcomingPayments.map(p => {
-          const days = daysFromToday(p.planned_date);
-          const urgency = days === 0 ? 'due *today*' : `due in *${days} day${days === 1 ? '' : 's'}* (${fmtDate(p.planned_date)})`;
+          const days = daysFromToday(p.planned_milestone_completion_date);
+          const urgency = days === 0 ? 'due *today*' : `due in *${days} day${days === 1 ? '' : 's'}* (${fmtDate(p.planned_milestone_completion_date)})`;
           return `• ${p.line_item || 'Payment milestone'} — ${urgency}`;
         }).join('\n');
 
