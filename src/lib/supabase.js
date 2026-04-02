@@ -720,9 +720,19 @@ export async function getDmActions(projectId) {
 }
 
 export async function upsertDmAction(action) {
+  // Only send known DB columns — strips any camelCase keys from local state
+  const row = {
+    ...(action.id         ? { id: action.id }                 : {}),
+    project_id: action.project_id,
+    text:       action.text       ?? '',
+    status:     action.status     ?? 'Not Started',
+    by_when:    action.by_when    ?? action.byWhen ?? null,
+    impact:     action.impact     ?? '',
+    sort_order: action.sort_order ?? 0,
+  };
   const { data, error } = await supabase
     .from('dm_actions')
-    .upsert(action)
+    .upsert(row)
     .select()
     .single();
   if (error) throw error;
