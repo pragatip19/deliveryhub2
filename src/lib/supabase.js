@@ -706,3 +706,30 @@ export async function upsertPendingRevenueCell(cell) {
   if (error) throw error;
   return data;
 }
+
+// ── DM Action Items ───────────────────────────────────────────────────────────
+
+export async function getDmActions(projectId) {
+  const { data, error } = await supabase
+    .from('dm_actions')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('sort_order');
+  if (error) throw error;
+  return data || [];
+}
+
+export async function upsertDmAction(action) {
+  const { data, error } = await supabase
+    .from('dm_actions')
+    .upsert(action)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteDmAction(id) {
+  const { error } = await supabase.from('dm_actions').delete().eq('id', id);
+  if (error) throw error;
+}

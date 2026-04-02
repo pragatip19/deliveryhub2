@@ -197,6 +197,15 @@ export default async function handler(req, res) {
       // Only alert if >10% behind
       if (sow.behindPct <= 10) { log.push(`  → within threshold, no alert`); continue; }
 
+      // Fetch DM action items (not Done)
+      const dmActions = await sbGet(
+        `dm_actions?select=text,status,by_when,impact` +
+        `&project_id=eq.${proj.id}` +
+        `&status=not.in.(Done)` +
+        `&order=sort_order`
+      );
+      const pendingActions = dmActions.filter(a => a.text?.trim());
+
       // Fetch payments due within 5 days (not yet paid)
       const payments = await sbGet(
         `payments?select=line_item,payment_status,planned_date` +
@@ -237,6 +246,20 @@ export default async function handler(req, res) {
           },
         },
       ];
+
+      // DM Next Action Items
+      if (pendingActions.length > 0) {
+        const actionLines = pendingActions.map(a => {
+          const due = a.by_when ? ` — due *${fmtDate(a.by_when)}*` : '';
+          const status = a.status === 'In Progress' ? ' _(In Progress)_' : '';
+          return `• ${a.text}${due}${status}`;
+        }).join('\n');
+        blocks.push({ type: 'divider' });
+        blocks.push({
+          type: 'section',
+          text: { type: 'mrkdwn', text: `📋 *Next Action Items:*\n${actionLines}` },
+        });
+      }
 
       // Upcoming payment milestones
       if (upcomingPayments.length > 0) {

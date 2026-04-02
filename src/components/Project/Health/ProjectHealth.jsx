@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Edit2, Save, X, AlertTriangle, Activity, TrendingUp, TrendingDown, Minus, Calendar, Target, Clock, AlertCircle, CalendarDays, Plus, MoreVertical } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getPlanTasks, updateProject, getRaidItems } from '../../../lib/supabase';
+import { getPlanTasks, updateProject, getRaidItems, getDmActions, upsertDmAction, deleteDmAction } from '../../../lib/supabase';
 import { calcSOWCompletion, getActiveTasks, getKickoffDate, getProjectedGoLive, recalculatePlan } from '../../../lib/calculations';
 import { networkdays, addWorkdays, formatDate, formatDateInput, today, parseDate, toDateStr } from '../../../lib/workdays';
 
@@ -87,20 +87,7 @@ export default function ProjectHealth({ project, canEdit }) {
   const [editing, setEditing]       = useState(null);
   const [editVal, setEditVal]       = useState('');
 
-  const dmActionsKey = `dmActions_${project?.id}`;
-  const [dmActions, setDmActions]   = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(`dmActions_${project?.id}`) || '[]');
-      const arr = Array.isArray(saved) ? saved : [];
-      const normalized = arr.map(a => ({
-        text: a.text || '', byWhen: a.byWhen || '',
-        status: a.status || 'Not Started', impact: a.impact || '',
-      }));
-      return normalized.length > 0 ? normalized : [{ text: '', byWhen: '', status: 'Not Started', impact: '' }];
-    } catch {
-      return [{ text: '', byWhen: '', status: 'Not Started', impact: '' }];
-    }
-  });
+  const [dmActions, setDmActions]   = useState([]);
   const [dmMenuOpen, setDmMenuOpen] = useState(null);
 
   useEffect(() => { setLocalProject(project); }, [project]);
@@ -109,17 +96,44 @@ export default function ProjectHealth({ project, canEdit }) {
     async function load() {
       setLoading(true);
       try {
-        const [tasksData, risks, issues] = await Promise.all([
+        const [tasksData, risks, issues, dbActions] = await Promise.all([
           getPlanTasks(project.id),
           getRaidItems(project.id, 'risk').catch(() => []),
           getRaidItems(project.id, 'issue').catch(() => []),
+          getDmActions(project.id).catch(() => []),
         ]);
-        // Recalculate so derived fields (days_delay, delay_status) are populated —
-        // they are stripped before DB saves in ProjectPlan so we must recompute here.
         const calcTasks = tasksData?.length ? recalculatePlan(tasksData) : (tasksData || []);
         setTasks(calcTasks);
         setOpenRisks((risks || []).filter(r => r.status !== 'Closed' && r.status !== 'Resolved').length);
         setOpenIssues((issues || []).filter(i => i.status !== 'Closed' && i.status !== 'Resolved').length);
+
+        if (dbActions.length > 0) {
+          setDmActions(dbActions);
+        } else {
+          // Migrate from localStorage if DB is empty
+          try {
+            const lsKey = `dmActions_${project.id}`;
+            const saved = JSON.parse(localStorage.getItem(lsKey) || '[]');
+            const arr = Array.isArray(saved) ? saved.filter(a => a.text?.trim()) : [];
+            if (arr.length > 0) {
+              const migrated = await Promise.all(arr.map((a, i) =>
+                upsertDmAction({
+                  id: crypto.randomUUID(),
+                  project_id: project.id,
+                  text: a.text || '',
+                  status: a.status || 'Not Started',
+                  by_when: a.byWhen || null,
+                  impact: a.impact || '',
+                  sort_order: i,
+                })
+              ));
+              setDmActions(migrated);
+              localStorage.removeItem(lsKey);
+            } else {
+              setDmActions([]);
+            }
+          } catch { setDmActions([]); }
+        }
       } catch { toast.error('Failed to load health data'); }
       setLoading(false);
     }
@@ -376,10 +390,16 @@ export default function ProjectHealth({ project, canEdit }) {
           <h3 className="text-sm font-semibold text-slate-800">DM Action Items</h3>
           <span className="text-[10px] text-slate-400">from daily call</span>
           <button
-            onClick={() => {
-              const updated = [...dmActions, { text: '', byWhen: '', status: 'Not Started', impact: '' }];
-              setDmActions(updated);
-              try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
+            onClick={async () => {
+              try {
+                const newAction = await upsertDmAction({
+                  id: crypto.randomUUID(),
+                  project_id: project.id,
+                  text: '', status: 'Not Started', by_when: null, impact: '',
+                  sort_order: dmActions.length,
+                });
+                setDmActions(prev => [...prev, newAction]);
+              } catch { toast.error('Failed to add action item'); }
             }}
             className="ml-auto flex items-center gap-1 px-2 py-1 text-[10px] bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg border border-amber-200 transition font-medium"
           >
@@ -396,17 +416,20 @@ export default function ProjectHealth({ project, canEdit }) {
         </div>
         <div className="space-y-2">
           {dmActions.map((action, i) => {
-            const updateField = (field, val) => {
+            const updateField = async (field, val) => {
+              const dbField = field === 'byWhen' ? 'by_when' : field;
               const updated = dmActions.map((a, idx) => idx === i ? { ...a, [field]: val } : a);
               setDmActions(updated);
-              try { localStorage.setItem(dmActionsKey, JSON.stringify(updated)); } catch {}
+              try {
+                await upsertDmAction({ ...action, project_id: project.id, [dbField]: val || null });
+              } catch { toast.error('Failed to save action item'); }
             };
-            const deleteRow = () => {
-              const updated = dmActions.filter((_, idx) => idx !== i);
-              const final = updated.length ? updated : [{ text: '', byWhen: '', status: 'Not Started', impact: '' }];
-              setDmActions(final);
+            const deleteRow = async () => {
               setDmMenuOpen(null);
-              try { localStorage.setItem(dmActionsKey, JSON.stringify(final)); } catch {}
+              try {
+                if (action.id) await deleteDmAction(action.id);
+                setDmActions(prev => prev.filter((_, idx) => idx !== i));
+              } catch { toast.error('Failed to delete action item'); }
             };
             const statusColors = {
               'Not Started': 'bg-gray-100 text-gray-600',
@@ -462,7 +485,7 @@ export default function ProjectHealth({ project, canEdit }) {
                 {/* By When */}
                 <input
                   type="date"
-                  value={action.byWhen}
+                  value={action.by_when || ''}
                   onChange={e => updateField('byWhen', e.target.value)}
                   className="w-28 shrink-0 text-xs px-2 py-1.5 border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-slate-700 bg-white"
                 />
