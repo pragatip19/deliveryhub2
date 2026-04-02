@@ -189,9 +189,18 @@ export default async function handler(req, res) {
         };
         log.push(`${proj.name}: ${sow.current}% actual, ${sow.expected}% expected, ${sow.behindPct}% behind (stored)`);
       } else {
-        sow = calcSOWCompletion(tasks, null);
+        // Replicate Health page's sowDenominator exactly: networkdays(firstTask, projGoLive)
+        const eligible = tasks.filter(t => t.planned_start && t.planned_end && t.status !== 'Not Applicable');
+        const firstTaskDate = eligible.length > 0
+          ? new Date(Math.min(...eligible.map(t => parseDate(t.planned_start).getTime())))
+          : null;
+        const projGoLive = parseDate(projGoLiveStr);
+        const sowDenominator = firstTaskDate && projGoLive
+          ? networkdays(firstTaskDate, projGoLive)
+          : null;
+        sow = calcSOWCompletion(tasks, sowDenominator);
         if (!sow) { log.push(`${proj.name}: no eligible tasks — skipped`); continue; }
-        log.push(`${proj.name}: ${sow.current}% actual, ${sow.expected}% expected, ${sow.behindPct}% behind (computed)`);
+        log.push(`${proj.name}: ${sow.current}% actual, ${sow.expected}% expected, ${sow.behindPct}% behind (computed, denom=${sowDenominator}d)`);
       }
 
       // Only alert if >10% behind

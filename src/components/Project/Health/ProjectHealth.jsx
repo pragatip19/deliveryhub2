@@ -186,7 +186,7 @@ export default function ProjectHealth({ project, canEdit }) {
       sow_expected_pct: sowCompletion.expected,
       sow_behind_pct:   sowCompletion.behindPct,
       sow_computed_at:  new Date().toISOString(),
-    }).catch(() => {});
+    }).catch(err => console.error('SOW DB write failed:', err));
   }, [localProject?.id, tasks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isDelayed   = projectedGoLive && plannedGoLive && new Date(projectedGoLive) > new Date(plannedGoLive);
