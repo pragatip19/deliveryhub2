@@ -184,7 +184,7 @@ export default function ProjectHealth({ project, canEdit }) {
     updateProject(localProject.id, {
       sow_current_pct:  sowCompletion.current,
       sow_expected_pct: sowCompletion.expected,
-      sow_behind_pct:   sowCompletion.behindPct,
+      sow_behind_pct:   Math.round(Math.max(0, -(sowCompletion.current - sowCompletion.expected)) * 10) / 10,
       sow_computed_at:  new Date().toISOString(),
     }).catch(err => console.error('SOW DB write failed:', err));
   }, [localProject?.id, tasks]); // eslint-disable-line react-hooks/exhaustive-deps
