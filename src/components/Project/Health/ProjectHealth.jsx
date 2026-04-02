@@ -178,6 +178,17 @@ export default function ProjectHealth({ project, canEdit }) {
   const expectedSOW   = sowCompletion?.expected ?? 0;
   const sowDelta      = currentSOW - expectedSOW;
 
+  // Persist computed SOW values to DB so Hub card and Slack always read the same numbers
+  useEffect(() => {
+    if (!sowCompletion || !localProject?.id) return;
+    updateProject(localProject.id, {
+      sow_current_pct:  sowCompletion.current,
+      sow_expected_pct: sowCompletion.expected,
+      sow_behind_pct:   sowCompletion.behindPct,
+      sow_computed_at:  new Date().toISOString(),
+    }).catch(() => {});
+  }, [localProject?.id, tasks]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const isDelayed   = projectedGoLive && plannedGoLive && new Date(projectedGoLive) > new Date(plannedGoLive);
   // Status badge is driven by SOW delta (same signal shown in the SOW completion bars), not Release System delay days
   const statusLabel = !kickoffDate ? 'Not Started' : (sowDelta < 0 ? 'Delayed' : 'On Track');

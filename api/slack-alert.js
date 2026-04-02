@@ -160,7 +160,7 @@ export default async function handler(req, res) {
 
   try {
     const projects = await sbGet(
-      'projects?select=id,name,dm_id,kickoff_date,planned_go_live,projected_go_live,target_sow_completion_days,categories(name)'
+      'projects?select=id,name,dm_id,kickoff_date,planned_go_live,projected_go_live,sow_current_pct,sow_expected_pct,sow_behind_pct,sow_computed_at,categories(name)'
     );
     const profiles = await sbGet('profiles?select=id,email,full_name');
     const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
@@ -172,25 +172,26 @@ export default async function handler(req, res) {
     for (const proj of projects) {
       const dm = proj.dm_id ? profileMap[proj.dm_id] : null;
 
-      // Fetch plan tasks
+      // Use SOW values stored by the Health page — single source of truth, no recomputation
+      if (proj.sow_behind_pct === null || proj.sow_behind_pct === undefined) {
+        log.push(`${proj.name}: no SOW data yet — open the project in the app first`);
+        continue;
+      }
+
+      const sow = {
+        current:   proj.sow_current_pct,
+        expected:  proj.sow_expected_pct,
+        behindPct: proj.sow_behind_pct,
+      };
+
+      // Fetch tasks only to derive projected go-live date for display
       const tasks = await sbGet(
-        `project_plan?select=id,activities,planned_start,planned_end,actual_start,status` +
+        `project_plan?select=activities,planned_end` +
         `&project_id=eq.${proj.id}`
       );
-
-      // Derive kickoff and projected go-live exactly as the UI does
-      const kickoffStr    = proj.kickoff_date || getKickoffDate(tasks);
       const projGoLiveStr = getProjectedGoLive(tasks) || proj.projected_go_live;
-      const kickoff    = parseDate(kickoffStr);
-      const projGoLive = parseDate(projGoLiveStr);
 
-      // Match Health page exactly: derive denominator from actual task span (first task → go-live)
-      // calcSOWCompletion uses actualSpanDays when targetDays is null — same as Health page logic
-      const sow = calcSOWCompletion(tasks, null);
-
-      if (!sow) { log.push(`${proj.name}: no eligible tasks — skipped`); continue; }
-
-      log.push(`${proj.name}: ${sow.current}% actual, ${sow.expected}% expected, ${sow.behindPct}% behind`);
+      log.push(`${proj.name}: ${sow.current}% actual, ${sow.expected}% expected, ${sow.behindPct}% behind (stored ${proj.sow_computed_at?.slice(0,10) || '?'})`);
 
       // Only alert if >10% behind
       if (sow.behindPct <= 10) { log.push(`  → within threshold, no alert`); continue; }

@@ -148,9 +148,8 @@ function EditProjectModal({ project, onClose, onSaved, dmProfiles, categories, c
 function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onDuplicate, onNavigate }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
-  const [sowData, setSowData]               = useState(null);
-  const [taskKickoff, setTaskKickoff]       = useState(null); // kickoff derived from tasks
-  const [taskProjGoLive, setTaskProjGoLive] = useState(null); // projected go-live from Release System task
+  const [taskKickoff, setTaskKickoff]       = useState(null);
+  const [taskProjGoLive, setTaskProjGoLive] = useState(null);
 
   useEffect(() => {
     function handleClick(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); }
@@ -158,32 +157,26 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onDuplicat
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  // Load tasks — derive kickoff, projected go-live, and SOW completion exactly like ProjectHealth
+  // Load tasks only to derive kickoff + projected go-live dates for display
   useEffect(() => {
     if (!project?.id) return;
     getPlanTasks(project.id).then(rawTasks => {
       if (!rawTasks?.length) return;
-      // Run recalculatePlan so planned_end, days_delay, etc. match the Health page
       const tasks = recalculatePlan(rawTasks);
-      const kickoffStr   = project.kickoff_date || getKickoffDate(tasks);
-      const projGoLiveStr = getProjectedGoLive(tasks) || project.projected_go_live;
-      setTaskKickoff(kickoffStr || null);
-      setTaskProjGoLive(projGoLiveStr || null);
-
-      // Match Health page: derive denominator from actual task span (first task → go-live)
-      // calcSOWCompletion uses actualSpanDays when targetDays is null — same as Health page
-      setSowData(calcSOWCompletion(tasks, null));
+      setTaskKickoff(project.kickoff_date || getKickoffDate(tasks) || null);
+      setTaskProjGoLive(getProjectedGoLive(tasks) || project.projected_go_live || null);
     }).catch(() => {});
   }, [project?.id]);
 
   const goLiveDate = taskProjGoLive || project.projected_go_live || project.planned_go_live;
-  const currentSOW = sowData?.current  ?? 0;
-  const expectedSOW = sowData?.expected ?? 0;
-  const sowDelta   = currentSOW - expectedSOW;
-  // "Not Started" = Release System task has no projected go-live yet (plan not kicked off)
+
+  // Read SOW values stored by the Health page — single source of truth
+  const currentSOW  = project.sow_current_pct  ?? null;
+  const expectedSOW = project.sow_expected_pct ?? null;
+  const sowDelta    = currentSOW !== null && expectedSOW !== null ? currentSOW - expectedSOW : null;
   const hasProjectedGoLive = !!(taskProjGoLive || project.projected_go_live);
 
-  // Go-live on-track / delayed: compare projected go-live vs kickoff + target days
+  // Go-live on-track / delayed
   const targetDaysForGoLive = project.target_sow_completion_days || getCategoryTargetDays(project.category_name);
   const plannedGoLiveDate = taskKickoff ? addWorkdays(new Date(taskKickoff), targetDaysForGoLive) : null;
   const isGoLiveDelayed = !!(plannedGoLiveDate && taskProjGoLive &&
@@ -248,8 +241,8 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onDuplicat
           <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">
             Not Started
           </span>
-        ) : !sowData ? (
-          <span className="text-xs text-slate-300">Loading…</span>
+        ) : sowDelta === null ? (
+          <span className="text-xs text-slate-300">Open project to compute</span>
         ) : sowDelta < 0 ? (
           <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full bg-red-100 text-red-700">
             {Math.abs(sowDelta).toFixed(1)}% behind
