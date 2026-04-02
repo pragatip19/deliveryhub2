@@ -417,12 +417,16 @@ export default function ProjectHealth({ project, canEdit }) {
         <div className="space-y-2">
           {dmActions.map((action, i) => {
             const updateField = async (field, val) => {
+              // Always use snake_case keys in state so input bindings stay consistent
               const dbField = field === 'byWhen' ? 'by_when' : field;
-              const updated = dmActions.map((a, idx) => idx === i ? { ...a, [field]: val } : a);
+              const updated = dmActions.map((a, idx) => idx === i ? { ...a, [dbField]: val } : a);
               setDmActions(updated);
               try {
                 await upsertDmAction({ ...action, project_id: project.id, [dbField]: val || null });
-              } catch { toast.error('Failed to save action item'); }
+              } catch (err) {
+                console.error('DM action save error:', err);
+                toast.error('Failed to save action item');
+              }
             };
             const deleteRow = async () => {
               setDmMenuOpen(null);
