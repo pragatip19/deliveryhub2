@@ -170,13 +170,9 @@ function ProjectCard({ project, canEdit, canDelete, onEdit, onDelete, onDuplicat
       setTaskKickoff(kickoffStr || null);
       setTaskProjGoLive(projGoLiveStr || null);
 
-      const kickoff    = kickoffStr    ? new Date(kickoffStr)    : null;
-      const projGoLive = projGoLiveStr ? new Date(projGoLiveStr) : null;
-      const targetDays = getCategoryTargetDays(project.category_name);
-      const projectedDays = (kickoff && projGoLive)
-        ? Math.max(1, networkdays(kickoff, projGoLive))
-        : null;
-      setSowData(calcSOWCompletion(tasks, projectedDays || targetDays));
+      // Match Health page: derive denominator from actual task span (first task → go-live)
+      // calcSOWCompletion uses actualSpanDays when targetDays is null — same as Health page
+      setSowData(calcSOWCompletion(tasks, null));
     }).catch(() => {});
   }, [project?.id]);
 

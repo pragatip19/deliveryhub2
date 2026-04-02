@@ -184,11 +184,9 @@ export default async function handler(req, res) {
       const kickoff    = parseDate(kickoffStr);
       const projGoLive = parseDate(projGoLiveStr);
 
-      const categoryName = proj.categories?.name || '';
-      const targetDays = proj.target_sow_completion_days ||
-        (kickoff && projGoLive ? Math.max(1, networkdays(kickoff, projGoLive)) : getCategoryTargetDays(categoryName));
-
-      const sow = calcSOWCompletion(tasks, targetDays);
+      // Match Health page exactly: derive denominator from actual task span (first task → go-live)
+      // calcSOWCompletion uses actualSpanDays when targetDays is null — same as Health page logic
+      const sow = calcSOWCompletion(tasks, null);
 
       if (!sow) { log.push(`${proj.name}: no eligible tasks — skipped`); continue; }
 
