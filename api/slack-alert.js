@@ -180,12 +180,15 @@ export default async function handler(req, res) {
       const projGoLiveStr = getProjectedGoLive(tasks) || proj.projected_go_live;
 
       // Use stored SOW values if available (written by Health page), otherwise compute inline
+      // Derive behindPct from current+expected (same as Hub card) — never read sow_behind_pct directly
       let sow;
-      if (proj.sow_behind_pct !== null && proj.sow_behind_pct !== undefined) {
+      if (proj.sow_current_pct !== null && proj.sow_current_pct !== undefined &&
+          proj.sow_expected_pct !== null && proj.sow_expected_pct !== undefined) {
+        const behindPct = Math.round(Math.max(0, proj.sow_expected_pct - proj.sow_current_pct) * 10) / 10;
         sow = {
           current:   proj.sow_current_pct,
           expected:  proj.sow_expected_pct,
-          behindPct: proj.sow_behind_pct,
+          behindPct,
         };
         log.push(`${proj.name}: ${sow.current}% actual, ${sow.expected}% expected, ${sow.behindPct}% behind (stored)`);
       } else {
