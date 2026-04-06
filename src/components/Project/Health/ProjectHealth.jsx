@@ -395,6 +395,47 @@ export default function ProjectHealth({ project, canEdit }) {
         </div>
       </div>
 
+      {/* ── SOW Completion Date — only for Live Under Scaleup projects ── */}
+      {localProject?.deal_stage === 'Live Under Scaleup' && (
+        <div className="bg-white border border-purple-200 rounded-xl p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-700">SOW Completion Date</h3>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Date the project went fully live · syncs to HubSpot as <code className="bg-slate-100 px-1 rounded">implementation_closed_date</code>
+              </p>
+            </div>
+            {canEdit && editing !== 'sow_completion_date' && (
+              <button
+                onClick={() => { setEditing('sow_completion_date'); setEditVal(localProject?.sow_completion_date || ''); }}
+                className="text-[10px] text-slate-400 hover:text-slate-600 border border-slate-200 px-2 py-1 rounded-lg"
+              >
+                {localProject?.sow_completion_date ? 'Edit' : '+ Set date'}
+              </button>
+            )}
+          </div>
+          {editing === 'sow_completion_date' ? (
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                type="date"
+                value={editVal}
+                onChange={e => setEditVal(e.target.value)}
+                className="border border-slate-300 rounded-lg px-2 py-1 text-xs"
+              />
+              <button
+                onClick={() => saveField('sow_completion_date', editVal || null)}
+                className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700"
+              >Save</button>
+              <button onClick={() => setEditing(null)} className="text-xs text-slate-400 px-2 py-1">Cancel</button>
+            </div>
+          ) : (
+            <p className={`mt-2 text-sm font-semibold ${localProject?.sow_completion_date ? 'text-purple-700' : 'text-slate-400'}`}>
+              {localProject?.sow_completion_date ? fmtDate(localProject.sow_completion_date) : '—'}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* ── DM Action Items — full width below SOW, dynamic rows ── */}
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
         <div className="flex items-center gap-2 mb-3">

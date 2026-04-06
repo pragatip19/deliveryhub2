@@ -131,7 +131,7 @@ export default function HubSpotPage() {
         target_sow_days:  proj?.target_sow_completion_days ?? null,
         actual_onboarding: actualOnboarding,
         delivery_context: proj?.delivery_context || '',
-        dm_name:          proj?.profiles?.full_name || '—',
+        dm_name:          proj?.profiles?.full_name || deal.delivery_manager || '—',
         gap_pct:          gapPct,
         critical_next:    action?.text || null,
         delivery_plan_url: proj ? `${APP_URL}/project/${proj.id}/plan` : null,

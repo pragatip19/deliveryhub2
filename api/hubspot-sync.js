@@ -153,6 +153,17 @@ async function maybeCreateProject(deal, stageLabel, log) {
   const categories   = await sbGet(`categories?name=eq.${encodeURIComponent(categoryName)}&select=id`);
   const categoryId   = categories?.[0]?.id || null;
 
+  // Match delivery manager name → profiles.id
+  let dmId = null;
+  const dmName = props.delivery_manager?.trim();
+  if (dmName) {
+    const profiles = await sbGet(
+      `profiles?full_name=ilike.${encodeURIComponent(dmName)}&select=id&limit=1`
+    );
+    dmId = profiles?.[0]?.id || null;
+    if (!dmId) log.push(`  Deal ${hsId}: delivery_manager "${dmName}" not found in profiles`);
+  }
+
   const projectName = props.dealname || `Deal ${hsId}`;
 
   const [newProject] = await sbPost('projects?select=id', {
@@ -162,6 +173,7 @@ async function maybeCreateProject(deal, stageLabel, log) {
     category_id:     categoryId,
     po_date:         props.po_date   || null,
     planned_go_live: null,
+    dm_id:           dmId,
     created_at:      new Date().toISOString(),
   }, 'return=representation');
 
@@ -170,7 +182,7 @@ async function maybeCreateProject(deal, stageLabel, log) {
     return;
   }
 
-  log.push(`  Deal ${hsId}: created project "${projectName}" (id: ${newProject.id})`);
+  log.push(`  Deal ${hsId}: created project "${projectName}" (id: ${newProject.id}, dm_id: ${dmId || 'unmatched'})`);
 
   // Create plan tasks
   const templateTasks = getTemplateTasks(categoryName);
@@ -222,7 +234,7 @@ export default async function handler(req, res) {
     }
 
     // 3. Search HubSpot for deals in those stages
-    const properties = ['dealname', 'dealstage', 'po_date', 'product', 'closedate', 'hs_object_id'];
+    const properties = ['dealname', 'dealstage', 'po_date', 'product', 'closedate', 'hs_object_id', 'delivery_manager'];
     let allDeals = [];
     let after;
 
@@ -244,14 +256,15 @@ export default async function handler(req, res) {
     const rows = allDeals.map(deal => {
       const p = deal.properties;
       return {
-        hs_object_id:     p.hs_object_id,
-        deal_name:        p.dealname    || null,
-        deal_stage:       p.dealstage   || null,
-        deal_stage_label: stageMap[p.dealstage] || p.dealstage || null,
-        po_date:          p.po_date     || null,
-        close_date:       p.closedate   || null,
-        product:          p.product     || null,
-        synced_at:        new Date().toISOString(),
+        hs_object_id:       p.hs_object_id,
+        deal_name:          p.dealname          || null,
+        deal_stage:         p.dealstage         || null,
+        deal_stage_label:   stageMap[p.dealstage] || p.dealstage || null,
+        po_date:            p.po_date           || null,
+        close_date:         p.closedate         || null,
+        product:            p.product           || null,
+        delivery_manager:   p.delivery_manager  || null,
+        synced_at:          new Date().toISOString(),
       };
     });
 
