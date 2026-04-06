@@ -4,7 +4,7 @@
   ],
   "crons": [
     { "path": "/api/slack-alert",      "schedule": "0 12 * * *"  },
-    { "path": "/api/hubspot-sync",     "schedule": "0 */2 * * *" },
+    { "path": "/api/hubspot-sync",     "schedule": "0 4 * * *" },
     { "path": "/api/hubspot-pushback", "schedule": "30 10 * * *" }
   ]
 }
