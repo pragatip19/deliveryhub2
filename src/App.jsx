@@ -10,6 +10,7 @@ import HubPage        from './components/Hub/HubPage';
 import ProjectPage    from './components/Project/ProjectPage';
 import AdminPanel     from './components/Admin/AdminPanel';
 import DealsPage      from './components/Deals/DealsPage';
+import HubSpotPage    from './components/HubSpot/HubSpotPage';
 
 function ProtectedRoute({ children, requireAdmin }) {
   const { user, profile, loading } = useAuth();
@@ -38,6 +39,7 @@ function AppRoutes() {
         <Route index               element={<HubPage />} />
         <Route path="project/:id/*" element={<ProjectPage />} />
         <Route path="deals/*"       element={<DealsPage />} />
+        <Route path="hubspot"       element={<HubSpotPage />} />
         <Route path="admin"         element={
           <ProtectedRoute requireAdmin>
             <AdminPanel />

@@ -241,7 +241,7 @@ export default function AdminPanel() {
             </button>
           </div>
           <p className="text-xs text-gray-400 mt-2">
-            Default applications (MES, Logbooks, CLEEN, DMS, AI Investigator, LMS, AI Agents) are seeded on first deploy.
+            Default applications (MES, Logbooks, CLEEN, DMS, LMS, AI Agents) are seeded on first deploy.
           </p>
         </div>
       )}

@@ -4,7 +4,7 @@
 // APPLICATIONS
 // ============================================================
 export const APPLICATIONS = [
-  'MES', 'Logbooks', 'CLEEN', 'DMS', 'AI Investigator', 'LMS', 'AI Agents'
+  'MES', 'Logbooks', 'CLEEN', 'DMS', 'LMS', 'AI Agents'
 ];
 
 // ============================================================
@@ -498,7 +498,7 @@ export function getTemplateForCategory(categoryName) {
   if (categoryName === 'Logbooks') {
     return { milestones: LOGBOOKS_MILESTONES, tasks: LOGBOOKS_TASKS, hasUAT: true, uatType: 'logbooks' };
   }
-  // MES, DMS, AI Investigator, LMS, AI Agents → MES template
+  // MES, DMS, LMS, AI Agents → MES template
   return { milestones: MES_MILESTONES, tasks: MES_TASKS, hasUAT: true, uatType: 'mes' };
 }
 

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import {
   Home, FileText, Calendar, ClipboardList, Users, CreditCard,
   MessageSquare, AlertTriangle, FileBox, Activity, ChevronDown,
-  ChevronRight, BarChart2, TrendingUp, DollarSign, Briefcase
+  ChevronRight, BarChart2, TrendingUp, DollarSign, Briefcase, Zap
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -42,6 +42,17 @@ export default function Sidebar({ open }) {
           <DealsNav location={location} />
         </div>
       )}
+
+      {/* HubSpot */}
+      <div className="px-2 mb-1">
+        <NavLink
+          to="/hubspot"
+          className={({ isActive }) => `${NAV_ITEM} ${isActive ? ACTIVE : INACTIVE}`}
+        >
+          <Zap className="w-4 h-4" />
+          HubSpot
+        </NavLink>
+      </div>
 
       {/* Project-specific navigation */}
       {isProject && projectId && (
