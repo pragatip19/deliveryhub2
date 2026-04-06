@@ -154,12 +154,13 @@ export default function ProjectHealth({ project, canEdit }) {
   const workCompleted          = kickoffDate ? networkdays(new Date(kickoffDate), today()) : 0;
   const projectedOnboardingDays = projectedGoLive && kickoffDate
     ? networkdays(new Date(kickoffDate), new Date(projectedGoLive)) : null;
-  const daysRemaining = plannedGoLive
-    ? Math.max(0, networkdays(today(), new Date(plannedGoLive)) - 1) : null;
+  // Days remaining until projected go-live (not planned)
+  const daysRemaining = projectedGoLive
+    ? Math.max(0, networkdays(today(), new Date(projectedGoLive)) - 1) : null;
 
-  // Delay Days from "Release System" task
+  // Delay Days = baseline_planned_end → planned_end of Release System task
   const releaseTask = tasks.find(t => t.activities?.toLowerCase().includes('release system'));
-  const delayDays   = (releaseTask?.baseline_planned_end && releaseTask?.planned_end)
+  const delayDays = (releaseTask?.baseline_planned_end && releaseTask?.planned_end)
     ? Math.max(0, networkdays(parseDate(releaseTask.baseline_planned_end), parseDate(releaseTask.planned_end)) - 1)
     : null;
 
@@ -319,7 +320,7 @@ export default function ProjectHealth({ project, canEdit }) {
             />
             <StatCard icon={Clock} iconColor="text-pink-600" bg="bg-pink-50 border-pink-100" accent="bg-pink-100"
               label="Days Remaining" value={daysRemaining !== null ? `${daysRemaining}d` : '—'}
-              sub="Until planned go-live"
+              sub="Until projected go-live"
             />
             <div className={`rounded-xl border p-3 flex flex-col gap-1.5 ${
               delayDays === null ? 'bg-slate-50 border-slate-200'
