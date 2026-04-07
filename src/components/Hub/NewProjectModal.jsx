@@ -126,7 +126,7 @@ export default function NewProjectModal({ isOpen, onClose, onProjectCreated }) {
       }
 
       // Load SOW template
-      const sowItems = (SOW_TEMPLATE || []).map((item) => ({ ...item, project_id: projectId }));
+      const sowItems = (template?.sowTemplate || SOW_TEMPLATE || []).map((item) => ({ ...item, project_id: projectId }));
       if (sowItems.length > 0) await bulkUpsertSOWItems(sowItems);
 
       // Load Payments template

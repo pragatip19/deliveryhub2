@@ -14,6 +14,7 @@ import {
   SOW_TEMPLATE,
   SOW_SECTIONS,
   SOW_DROPDOWN_OPTIONS,
+  getTemplateForCategory,
 } from '../../../lib/templates';
 
 // Color map for common SOW specification values
@@ -240,7 +241,9 @@ const SOWTab = ({ project, canEdit }) => {
       setSaving(true);
       // Delete all existing rows first to prevent duplicates
       await deleteAllSOWItems(project.id);
-      const rows = SOW_TEMPLATE.map((row, idx) => ({
+      const categoryTemplate = getTemplateForCategory(project?.category_name);
+      const activeSOWTemplate = categoryTemplate?.sowTemplate || SOW_TEMPLATE;
+      const rows = activeSOWTemplate.map((row, idx) => ({
         ...row,
         project_id: project.id,
         sort_order: idx,
