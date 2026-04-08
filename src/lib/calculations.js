@@ -304,7 +304,10 @@ export function calcSOWCompletion(tasks, targetDays, todayOverride) {
     _e: parseDate(t.planned_end).setHours(0, 0, 0, 0),
   }));
 
-  // 6. Accumulate per-task weights — each day's share divided by active task count
+  // 6. Accumulate per-task weights — parallelism-adjusted day count per task
+  // Each working day contributes 1 unit shared equally among all active tasks.
+  // We do NOT divide by totalDays here; we normalise later against the total
+  // task weight so that gap days never distort the percentage.
   const weights = {};
   eligible.forEach(t => { weights[t.id] = 0; });
 
@@ -312,16 +315,22 @@ export function calcSOWCompletion(tasks, targetDays, todayOverride) {
     const ts = day.getTime();
     const active = stamped.filter(t => ts >= t._s && ts <= t._e);
     if (active.length === 0) continue;                         // gap day — skip
-    const share = 1 / (totalDays * active.length);            // uses targetDays as denominator
+    const share = 1 / active.length;                          // parallelism-adjusted
     active.forEach(t => { weights[t.id] += share; });
   }
 
-  // 7. Current % = sum of weights for all "Done" tasks
-  const currentFrac = eligible
+  // 7. Current % = Done task weight / TOTAL task weight
+  // Normalising against total task weight (not totalDays) means gap days and
+  // overlaps don't distort the result: if half the work is done → 50%.
+  const totalTaskWeight = eligible.reduce((sum, t) => sum + (weights[t.id] || 0), 0);
+  const doneTaskWeight  = eligible
     .filter(t => t.status === 'Done')
-    .reduce((sum, t) => sum + weights[t.id], 0);
+    .reduce((sum, t) => sum + (weights[t.id] || 0), 0);
+  const currentFrac = totalTaskWeight > 0 ? doneTaskWeight / totalTaskWeight : 0;
 
-  // 8. Expected % = elapsed working days since project start / targetDays (time only)
+  // 8. Expected % = elapsed working days since project start / totalDays (time-based)
+  // totalDays = networkdays(firstTask → projectedGoLive), so Expected % dynamically
+  // adjusts whenever the projected go-live date changes.
   const todayNorm = new Date(todayDate);
   todayNorm.setHours(0, 0, 0, 0);
 

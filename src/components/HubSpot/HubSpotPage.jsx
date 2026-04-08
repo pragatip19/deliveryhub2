@@ -12,7 +12,7 @@ const VIEWS = [
   { id: 'closed_won',        label: 'Closed Won',               stages: ['Closed Won'] },
   { id: 'ready',             label: 'Ready for Onboarding',     stages: ['Ready for Onboarding'] },
   { id: 'under_onboarding',  label: 'Under Onboarding',         stages: ['Under Onboarding'] },
-  { id: 'live_scaleup',      label: 'Live Under Scaleup',       stages: ['Live Under Scaleup'] },
+  { id: 'live_scaleup',      label: 'Live Under Scaleup',       stages: ['Live Under Scaleup', 'Live-Under Scaleup'] },
 ];
 
 const COLS = [

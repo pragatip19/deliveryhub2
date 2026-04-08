@@ -33,7 +33,7 @@ const COLUMNS = [
   { key: 'planned_end',            label: 'Planned End',          width: 120, frozen: false, type: 'date', readOnly: true },
   { key: 'actual_start',           label: 'Actual Start',         width: 120, frozen: false, type: 'date' },
   { key: 'current_end',            label: 'Current End',          width: 120, frozen: false, type: 'date' },
-  { key: 'dependency',             label: 'Dependency',           width: 190, frozen: false, type: 'text' },
+  { key: 'dependency',             label: 'Dependency',           width: 190, frozen: false, type: 'dependency' },
   { key: 'deviation',              label: 'Deviation',            width: 110, frozen: false, type: 'text' },
   { key: 'deviation_details',      label: 'Deviation Details',    width: 190, frozen: false, type: 'text' },
   { key: 'delay_status',           label: 'Delay / On Track',     width: 120, frozen: false, type: 'badge',  readOnly: true },
@@ -948,6 +948,24 @@ const ProjectPlan = ({ project, canEdit }) => {
     if (col.key === 'status')    return <select value={val||'Not Started'} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}>{STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}</select>;
     if (col.key === 'owner')     return <select value={val||''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>;
     if (col.key === 'milestone') return <select value={val||''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{milestones.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select>;
+    if (col.key === 'dependency') return (
+      <select
+        value={val || ''}
+        onChange={e => commit(e.target.value)}
+        onKeyDown={onEnterKey}
+        className={cls}
+        autoFocus
+        onBlur={() => setEditCell(null)}
+      >
+        <option value="">— (none)</option>
+        {tasks
+          .filter(t => t.id !== task.id && t.activities?.trim())
+          .map(t => (
+            <option key={t.id} value={t.activities}>{t.activities}</option>
+          ))
+        }
+      </select>
+    );
     if (col.type === 'date') {
       const dv = val ? formatDateInput(typeof val==='string' ? parseDate(val) : val) : '';
       // Use defaultValue (uncontrolled) + commit only on blur — NOT on onChange.

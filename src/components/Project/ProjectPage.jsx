@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, useLocation, Routes, Route } from 'react-router-dom';
+import { useParams, useNavigate, Routes, Route } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
@@ -16,27 +16,9 @@ import FeedbackTab from './Feedback/FeedbackTab';
 import DocumentsTab from './Documents/DocumentsTab';
 import DeliveryPlanTab from './DeliveryPlan/DeliveryPlanTab';
 
-const TABS = [
-  { id: 'health',        label: 'Health',         path: 'health' },
-  { id: 'sow',           label: 'SOW',            path: 'sow' },
-  { id: 'milestones',    label: 'Milestones',     path: 'milestones' },
-  { id: 'plan',          label: 'Plan',           path: 'plan' },
-  { id: 'delivery-plan', label: 'Delivery Plan',  path: 'delivery-plan' },
-  { id: 'people',        label: 'People',         path: 'people' },
-  { id: 'payments',      label: 'Payments',       path: 'payments' },
-  { id: 'uat',           label: 'UAT',            path: 'uat' },
-  { id: 'risks',         label: 'Risks',          path: 'risks' },
-  { id: 'assumptions',   label: 'Assumptions',    path: 'assumptions' },
-  { id: 'issues',        label: 'Issues',         path: 'issues' },
-  { id: 'dependencies',  label: 'Dependencies',   path: 'dependencies' },
-  { id: 'feedback',      label: 'Feedback',       path: 'feedback' },
-  { id: 'documents',     label: 'Documents',      path: 'documents' },
-];
 
 export default function ProjectPage() {
   const { id: projectId } = useParams();
-  const location = useLocation();
-  const tab = location.pathname.split('/').pop();
   const navigate = useNavigate();
   const { user, canEditProject } = useAuth();
   const [project, setProject] = useState(null);
@@ -65,10 +47,6 @@ export default function ProjectPage() {
       }
       setProject(projectData);
 
-      // Default to health tab if no tab is specified
-      if (!tab) {
-        navigate(`/project/${projectId}/health`);
-      }
     } catch (error) {
       console.error('Error loading project:', error);
       toast.error('Failed to load project');
@@ -90,8 +68,6 @@ export default function ProjectPage() {
     return null;
   }
 
-  const currentTab = TABS.find((t) => t.path === tab) || TABS[0];
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Breadcrumb */}
@@ -105,27 +81,6 @@ export default function ProjectPage() {
           </button>
           <ChevronRight size={16} className="text-slate-400" />
           <span className="text-slate-700 font-medium">{project.name}</span>
-        </div>
-      </div>
-
-      {/* Tab Navigation — z-20 keeps it below the TopBar dropdown (z-30 stacking context) */}
-      <div className="bg-white border-b border-slate-200 sticky top-0 z-20">
-        <div className="px-6 overflow-x-auto">
-          <div className="flex gap-1">
-            {TABS.map((tabItem) => (
-              <button
-                key={tabItem.id}
-                onClick={() => navigate(`/project/${projectId}/${tabItem.path}`)}
-                className={`px-4 py-3 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
-                  currentTab.id === tabItem.id
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {tabItem.label}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 

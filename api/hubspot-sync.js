@@ -1,20 +1,21 @@
 // Vercel Serverless Function — Syncs HubSpot deals into Supabase hubspot_deals table
 // Also auto-creates projects for deals in "Ready for Onboarding" with no linked project
 // Cron: 0 */2 * * * (every 2 hours)
- 
+
 const HUBSPOT_TOKEN  = process.env.HUBSPOT_API_TOKEN;
 const SUPABASE_URL   = process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
- 
+
 const HS_BASE = 'https://api.hubapi.com';
- 
+
 const TARGET_STAGE_LABELS = [
   'Closed Won',
   'Ready for Onboarding',
   'Under Onboarding',
   'Live Under Scaleup',
+  'Live-Under Scaleup',
 ];
- 
+
 const PRODUCT_TO_CATEGORY = {
   'MES/Logbooks':      'Logbooks',
   'MES/Batch Records': 'MES',
@@ -23,7 +24,7 @@ const PRODUCT_TO_CATEGORY = {
   'OS/Documents':      'DMS',
   'Celestara':         'AI Agents',
 };
- 
+
 // ── HubSpot helpers ──────────────────────────────────────────────────────────
 async function hsGet(path) {
   const res = await fetch(`${HS_BASE}${path}`, {
@@ -32,7 +33,7 @@ async function hsGet(path) {
   if (!res.ok) throw new Error(`HubSpot GET ${path}: ${res.status} ${await res.text()}`);
   return res.json();
 }
- 
+
 async function hsPost(path, body) {
   const res = await fetch(`${HS_BASE}${path}`, {
     method: 'POST',
@@ -42,7 +43,7 @@ async function hsPost(path, body) {
   if (!res.ok) throw new Error(`HubSpot POST ${path}: ${res.status} ${await res.text()}`);
   return res.json();
 }
- 
+
 // ── Supabase helpers ─────────────────────────────────────────────────────────
 async function sbGet(path) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -51,7 +52,7 @@ async function sbGet(path) {
   if (!res.ok) throw new Error(`Supabase GET ${path}: ${res.status} ${await res.text()}`);
   return res.json();
 }
- 
+
 async function sbPost(path, body, prefer = 'resolution=merge-duplicates') {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method: 'POST',
@@ -67,7 +68,7 @@ async function sbPost(path, body, prefer = 'resolution=merge-duplicates') {
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
- 
+
 async function sbPatch(path, body) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method: 'PATCH',
@@ -83,7 +84,7 @@ async function sbPatch(path, body) {
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
- 
+
 // ── Template helpers ─────────────────────────────────────────────────────────
 function getTemplateTasks(categoryName) {
   const MES_TASKS = [
@@ -121,7 +122,7 @@ function getTemplateTasks(categoryName) {
   if (categoryName === 'CLEEN')    return CLEEN_TASKS;
   return MES_TASKS;
 }
- 
+
 function addWorkdays(startDate, days) {
   const date = new Date(startDate);
   let added = 0;
@@ -132,40 +133,44 @@ function addWorkdays(startDate, days) {
   }
   return date;
 }
- 
+
 function toDateStr(date) {
   return date.toISOString().split('T')[0];
 }
- 
+
 // ── Auto-create project + plan for a "Ready for Onboarding" deal ─────────────
-async function maybeCreateProject(deal, stageLabel, log) {
+async function maybeCreateProject(deal, stageLabel, ownerMap, log) {
   const props = deal.properties;
   const hsId  = props.hs_object_id;
- 
+
   // Check if project already linked
   const existing = await sbGet(`projects?hubspot_deal_id=eq.${hsId}&select=id`);
   if (existing?.length > 0) {
     log.push(`  Deal ${hsId}: project already exists, skipping auto-create`);
     return;
   }
- 
+
   const categoryName = PRODUCT_TO_CATEGORY[props.product] || 'MES';
   const categories   = await sbGet(`categories?name=eq.${encodeURIComponent(categoryName)}&select=id`);
   const categoryId   = categories?.[0]?.id || null;
- 
-  // Match delivery manager name → profiles.id
+
+  // Resolve numeric delivery_manager ID → name via ownerMap, then match to profiles
   let dmId = null;
-  const dmName = props.delivery_manager?.trim();
-  if (dmName) {
+  const rawDm   = props.delivery_manager?.trim() || null;
+  const dmName  = rawDm && ownerMap[String(rawDm)] ? ownerMap[String(rawDm)] : rawDm;
+  if (dmName && ownerMap[String(rawDm)]) {
+    // We have a real name — look up in profiles
     const profiles = await sbGet(
       `profiles?full_name=ilike.${encodeURIComponent(dmName)}&select=id&limit=1`
     );
     dmId = profiles?.[0]?.id || null;
-    if (!dmId) log.push(`  Deal ${hsId}: delivery_manager "${dmName}" not found in profiles`);
+    if (!dmId) log.push(`  Deal ${hsId}: DM "${dmName}" not found in profiles`);
+  } else if (rawDm) {
+    log.push(`  Deal ${hsId}: delivery_manager "${rawDm}" not in ownerMap, dm_id left null`);
   }
- 
+
   const projectName = props.dealname || `Deal ${hsId}`;
- 
+
   const [newProject] = await sbPost('projects?select=id', {
     name:            projectName,
     deal_stage:      stageLabel,
@@ -177,19 +182,19 @@ async function maybeCreateProject(deal, stageLabel, log) {
     dm_id:           dmId,
     created_at:      new Date().toISOString(),
   }, 'return=representation');
- 
+
   if (!newProject?.id) {
     log.push(`  Deal ${hsId}: failed to create project`);
     return;
   }
- 
+
   log.push(`  Deal ${hsId}: created project "${projectName}" (id: ${newProject.id}, dm_id: ${dmId || 'unmatched'})`);
- 
+
   // Create plan tasks
   const templateTasks = getTemplateTasks(categoryName);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
- 
+
   const planRows = templateTasks.map((t, i) => {
     const plannedStart = addWorkdays(today, t.planned_start_offset);
     const plannedEnd   = addWorkdays(new Date(plannedStart), t.duration - 1);
@@ -203,18 +208,18 @@ async function maybeCreateProject(deal, stageLabel, log) {
       duration:      t.duration,
     };
   });
- 
+
   await sbPost('project_plan', planRows, 'return=minimal');
   log.push(`  Deal ${hsId}: created ${planRows.length} plan tasks (${categoryName})`);
 }
- 
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (!HUBSPOT_TOKEN) return res.status(500).json({ error: 'HUBSPOT_API_TOKEN not set' });
   if (!SUPABASE_URL)  return res.status(500).json({ error: 'Supabase env vars not set' });
- 
+
   const log = [];
- 
+
   try {
     // 1. Fetch pipeline stages → stageId → label map
     const { results: pipelines } = await hsGet('/crm/v3/pipelines/deals');
@@ -224,7 +229,7 @@ export default async function handler(req, res) {
         stageMap[stage.id] = stage.label;
       }
     }
- 
+
     // Fetch HubSpot owners to resolve numeric delivery_manager IDs → names
     let ownerMap = {};
     try {
@@ -234,21 +239,21 @@ export default async function handler(req, res) {
         ownerMap[String(owner.id)] = name;
       }
     } catch (e) { log.push(`Warning: could not fetch HubSpot owners: ${e.message}`); }
- 
+
     // 2. Find stage IDs for our target labels
     const targetStageIds = Object.entries(stageMap)
       .filter(([, label]) => TARGET_STAGE_LABELS.includes(label))
       .map(([id]) => id);
- 
+
     if (targetStageIds.length === 0) {
       return res.status(200).json({ message: 'No matching deal stages found', stageMap });
     }
- 
+
     // 3. Search HubSpot for deals in those stages
     const properties = ['dealname', 'dealstage', 'po_date', 'product', 'closedate', 'hs_object_id', 'delivery_manager'];
     let allDeals = [];
     let after;
- 
+
     do {
       const body = {
         filterGroups: targetStageIds.map(id => ({
@@ -262,7 +267,7 @@ export default async function handler(req, res) {
       allDeals = allDeals.concat(results || []);
       after = paging?.next?.after;
     } while (after);
- 
+
     // 4. Upsert all deals into Supabase hubspot_deals table
     const rows = allDeals.map(deal => {
       const p = deal.properties;
@@ -280,12 +285,12 @@ export default async function handler(req, res) {
         synced_at:          new Date().toISOString(),
       };
     });
- 
+
     if (rows.length > 0) {
       await sbPost('hubspot_deals?on_conflict=hs_object_id', rows);
     }
     log.push(`Synced ${rows.length} deals into hubspot_deals`);
- 
+
     // 5. Update deal_stage on any existing linked projects
     for (const deal of allDeals) {
       const p = deal.properties;
@@ -296,25 +301,24 @@ export default async function handler(req, res) {
         log.push(`Updated deal_stage → "${label}" on project linked to deal ${p.hs_object_id}`);
       }
     }
- 
+
     // 6. Auto-create projects for "Ready for Onboarding" deals with no linked project
     const readyDeals = allDeals.filter(d => stageMap[d.properties.dealstage] === 'Ready for Onboarding');
     log.push(`Found ${readyDeals.length} deals in "Ready for Onboarding"`);
- 
+
     for (const deal of readyDeals) {
-      await maybeCreateProject(deal, 'Ready for Onboarding', log);
+      await maybeCreateProject(deal, 'Ready for Onboarding', ownerMap, log);
     }
- 
+
     return res.status(200).json({
       message: `Sync complete`,
       log,
       total_deals: rows.length,
       ready_for_onboarding: readyDeals.length,
     });
- 
+
   } catch (err) {
     console.error('hubspot-sync error:', err);
     return res.status(500).json({ error: err.message, log });
   }
 }
- 
