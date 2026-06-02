@@ -219,9 +219,45 @@ async function maybeCreateProject(deal, stageLabel, ownerMap, log) {
 
   // Insert milestones from template
   const MILESTONES_MAP = {
-    MES:      ['Kick-off Project','Share CSV Package','Map As-Is Process','Configure Application','Setup & Test Server','Conduct UAT','Train Users','Go-Live on Production','Hypercare','Publish Go-Live Report'],
-    Logbooks: ['Kick-off Project','Share CSV Package','Configure Logbooks','Setup & Test Server','Conduct UAT','Train Users','Go-Live on Production','Hypercare','Publish Go-Live Report'],
-    CLEEN:    ['Kick-off Project','Map As-Is Process','Finalize Configurations - Application','Finalize Configurations - SSO/LDAP','Conduct UAT','Share CSV Package','Train Users & Admins','Go-Live on Production','Hypercare','Publish Go-Live Report'],
+    MES: [
+      'Kick-off Project',
+      'Share CSV Package',
+      'Map As-Is Process',
+      'Assess Go-Live Readiness Infra',
+      'Finalize Configurations - Application',
+      'Finalize Configurations - SSO/LDAP',
+      'Finalize Configurations - ERP',
+      'Finalize Configurations - E1',
+      'Conduct UAT',
+      'Train Users & Admins',
+      'Go-Live on Production',
+      'Hypercare',
+      'Publish Go-Live Report',
+    ],
+    Logbooks: [
+      'Kick-off Project',
+      'Share CSV Package',
+      'Assess Go-Live Readiness Infra',
+      'Finalize Configurations - Application',
+      'Finalize Configurations - SSO/LDAP',
+      'Conduct UAT',
+      'Train Users & Admins',
+      'Go-Live on Production',
+      'Hypercare',
+      'Publish Go-Live Report',
+    ],
+    CLEEN: [
+      'Kick-off Project',
+      'Map As-Is Process',
+      'Finalize Configurations - Application',
+      'Finalize Configurations - SSO/LDAP',
+      'Conduct UAT',
+      'Share CSV Package',
+      'Train Users & Admins',
+      'Go-Live on Production',
+      'Hypercare',
+      'Publish Go-Live Report',
+    ],
   };
   const msNames = MILESTONES_MAP[categoryName] || MILESTONES_MAP['MES'];
   const msRows = msNames.map((name, i) => ({
