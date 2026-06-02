@@ -10,7 +10,7 @@ import debounce from 'lodash.debounce';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
   getPlanTasks, bulkUpsertPlanTasks, upsertPlanTask, deletePlanTask, clearPlanTasks,
-  getMilestones, getPeople,
+  getMilestones, getPeople, clearMilestones, bulkUpsertMilestones,
 } from '../../../lib/supabase';
 import { STATUS_OPTIONS, PLAN_TEMPLATE, getTemplateForCategory } from '../../../lib/templates';
 import { recalculatePlan, recalcAllDatesFromAnchor, getStatusColor } from '../../../lib/calculations';
@@ -658,13 +658,24 @@ const ProjectPlan = ({ project, canEdit }) => {
   const handleLoadTemplate = async () => {
     const categoryTmpl  = getTemplateForCategory(project?.category_name);
     const tasksToLoad   = categoryTmpl?.tasks || PLAN_TEMPLATE;
+    const msNames       = categoryTmpl?.milestones || [];
     const categoryLabel = project?.category_name || 'standard';
-    if (!window.confirm(`This will replace ALL existing tasks with the ${tasksToLoad.length}-task ${categoryLabel} template. Continue?`)) return;
+    if (!window.confirm(`This will replace ALL existing tasks and milestones with the ${tasksToLoad.length}-task ${categoryLabel} template. Continue?`)) return;
     try {
       toast('Loading template…', { duration: 3000 });
-      // 1. Bulk-delete all existing tasks atomically (prevents duplicates on repeat loads)
-      await clearPlanTasks(project.id);
-      // 2. Insert category-specific template tasks with deterministic sort_order 0 → N-1
+      // 1. Bulk-delete all existing tasks + milestones atomically
+      await Promise.all([clearPlanTasks(project.id), clearMilestones(project.id)]);
+      // 2. Seed milestones from template
+      if (msNames.length) {
+        const msRows = msNames.map((name, i) => ({
+          project_id: project.id,
+          name,
+          status: 'Not Started',
+          sort_order: i,
+        }));
+        await bulkUpsertMilestones(msRows);
+      }
+      // 3. Insert category-specific template tasks with deterministic sort_order 0 → N-1
       const toInsert = tasksToLoad.map((t, i) => ({
         project_id: project.id,
         milestone:  t.milestone,
@@ -677,11 +688,11 @@ const ProjectPlan = ({ project, canEdit }) => {
         sort_order: i,
       }));
       await bulkUpsertPlanTasks(toInsert);
-      // 3. Re-fetch ordered by sort_order (upsert response order is not guaranteed)
+      // 4. Re-fetch ordered by sort_order
       const fresh = await getPlanTasks(project.id);
       setTasks(fresh);
       pushHistory(fresh);
-      toast.success(`${tasksToLoad.length} tasks loaded (${categoryLabel} template)`);
+      toast.success(`${tasksToLoad.length} tasks + ${msNames.length} milestones loaded (${categoryLabel} template)`);
     } catch (e) {
       toast.error('Failed to load template: ' + (e.message || ''));
     }

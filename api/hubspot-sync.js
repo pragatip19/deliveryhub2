@@ -217,6 +217,22 @@ async function maybeCreateProject(deal, stageLabel, ownerMap, log) {
   await sbPost('project_plan', planRows, 'return=minimal');
   log.push(`  Deal ${hsId}: created ${planRows.length} plan tasks (${categoryName})`);
 
+  // Insert milestones from template
+  const MILESTONES_MAP = {
+    MES:      ['Kick-off Project','Share CSV Package','Map As-Is Process','Configure Application','Setup & Test Server','Conduct UAT','Train Users','Go-Live on Production','Hypercare','Publish Go-Live Report'],
+    Logbooks: ['Kick-off Project','Share CSV Package','Configure Logbooks','Setup & Test Server','Conduct UAT','Train Users','Go-Live on Production','Hypercare','Publish Go-Live Report'],
+    CLEEN:    ['Kick-off Project','Map As-Is Process','Finalize Configurations - Application','Finalize Configurations - SSO/LDAP','Conduct UAT','Share CSV Package','Train Users & Admins','Go-Live on Production','Hypercare','Publish Go-Live Report'],
+  };
+  const msNames = MILESTONES_MAP[categoryName] || MILESTONES_MAP['MES'];
+  const msRows = msNames.map((name, i) => ({
+    project_id: newProject.id,
+    name,
+    status:     'Not Started',
+    sort_order: i,
+  }));
+  await sbPost('milestones', msRows, 'return=minimal');
+  log.push(`  Deal ${hsId}: created ${msRows.length} milestones (${categoryName})`);
+
   // Insert UAT template rows for MES and Logbooks projects
   if (uatType) {
     const MES_UAT_GROUPS = [

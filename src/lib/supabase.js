@@ -297,6 +297,11 @@ export async function bulkUpsertMilestones(milestones) {
   return data || [];
 }
 
+export async function clearMilestones(projectId) {
+  const { error } = await supabase.from('milestones').delete().eq('project_id', projectId);
+  if (error) throw error;
+}
+
 // Recalculate milestone start/end from project plan tasks
 export async function recalcMilestoneDates(projectId) {
   const tasks = await getPlanTasks(projectId);
