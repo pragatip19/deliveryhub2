@@ -9,10 +9,10 @@ import toast from 'react-hot-toast';
 import debounce from 'lodash.debounce';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
-  getPlanTasks, bulkUpsertPlanTasks, upsertPlanTask, deletePlanTask,
+  getPlanTasks, bulkUpsertPlanTasks, upsertPlanTask, deletePlanTask, clearPlanTasks,
   getMilestones, getPeople,
 } from '../../../lib/supabase';
-import { STATUS_OPTIONS, PLAN_TEMPLATE } from '../../../lib/templates';
+import { STATUS_OPTIONS, PLAN_TEMPLATE, getTemplateForCategory } from '../../../lib/templates';
 import { recalculatePlan, recalcAllDatesFromAnchor, getStatusColor } from '../../../lib/calculations';
 import { calcPlannedEnd, formatDate, formatDateInput, parseDate } from '../../../lib/workdays';
 
@@ -283,7 +283,31 @@ const ProjectPlan = ({ project, canEdit }) => {
         const [t, m, p] = await Promise.all([
           getPlanTasks(project.id), getMilestones(project.id), getPeople(project.id),
         ]);
-        const arr  = t || [];
+        let arr = t || [];
+
+        // ── Auto-backfill null owners from the category template (lazy one-time migration) ──
+        // Rows loaded before the owner fix have owner = NULL. Silently patch them
+        // by matching the activity name against the correct category template.
+        const categoryTmpl = getTemplateForCategory(project?.category_name);
+        const categoryTasks = categoryTmpl?.tasks || PLAN_TEMPLATE;
+        const rowsNeedingOwner = arr.filter(row => !row.owner && row.activities?.trim());
+        if (rowsNeedingOwner.length > 0) {
+          // Build activity → owner lookup from the category-specific template
+          const tmplOwnerMap = Object.fromEntries(
+            categoryTasks
+              .filter(tmpl => tmpl.activities?.trim() && tmpl.owner)
+              .map(tmpl => [tmpl.activities.trim(), tmpl.owner])
+          );
+          const patched = rowsNeedingOwner
+            .map(row => ({ ...row, owner: tmplOwnerMap[row.activities.trim()] || null }))
+            .filter(row => row.owner); // only rows where we found a match
+          if (patched.length > 0) {
+            await bulkUpsertPlanTasks(patched);
+            const patchMap = Object.fromEntries(patched.map(r => [r.id, r.owner]));
+            arr = arr.map(row => patchMap[row.id] ? { ...row, owner: patchMap[row.id] } : row);
+          }
+        }
+
         const calc = arr.length ? recalculatePlan(arr) : arr;
         setTasks(calc); setMilestones(m || []); setPeople(p || []);
         pushHistory(calc);
@@ -632,20 +656,21 @@ const ProjectPlan = ({ project, canEdit }) => {
 
   // ── Load Template ─────────────────────────────────────────────────────────────
   const handleLoadTemplate = async () => {
-    if (!window.confirm(`This will replace ALL existing tasks with the ${PLAN_TEMPLATE.length}-task standard template. Continue?`)) return;
+    const categoryTmpl  = getTemplateForCategory(project?.category_name);
+    const tasksToLoad   = categoryTmpl?.tasks || PLAN_TEMPLATE;
+    const categoryLabel = project?.category_name || 'standard';
+    if (!window.confirm(`This will replace ALL existing tasks with the ${tasksToLoad.length}-task ${categoryLabel} template. Continue?`)) return;
     try {
       toast('Loading template…', { duration: 3000 });
-      // 1. Fetch + delete all existing tasks one-by-one (RLS-safe — same fn used by the UI Delete button)
-      const existing = await getPlanTasks(project.id);
-      if (existing.length > 0) {
-        await Promise.all(existing.map(t => deletePlanTask(t.id)));
-      }
-      // 2. Insert template tasks with deterministic sort_order 0 → N-1
-      const toInsert = PLAN_TEMPLATE.map((t, i) => ({
+      // 1. Bulk-delete all existing tasks atomically (prevents duplicates on repeat loads)
+      await clearPlanTasks(project.id);
+      // 2. Insert category-specific template tasks with deterministic sort_order 0 → N-1
+      const toInsert = tasksToLoad.map((t, i) => ({
         project_id: project.id,
         milestone:  t.milestone,
         activities: t.activities,
         tools:      t.tools,
+        owner:      t.owner || null,
         duration:   t.duration,
         dependency: t.dependency,
         status:     'Not Started',
@@ -656,7 +681,7 @@ const ProjectPlan = ({ project, canEdit }) => {
       const fresh = await getPlanTasks(project.id);
       setTasks(fresh);
       pushHistory(fresh);
-      toast.success(`${PLAN_TEMPLATE.length} tasks loaded in correct order`);
+      toast.success(`${tasksToLoad.length} tasks loaded (${categoryLabel} template)`);
     } catch (e) {
       toast.error('Failed to load template: ' + (e.message || ''));
     }
@@ -946,7 +971,17 @@ const ProjectPlan = ({ project, canEdit }) => {
     };
 
     if (col.key === 'status')    return <select value={val||'Not Started'} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}>{STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}</select>;
-    if (col.key === 'owner')     return <select value={val||''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>;
+    if (col.key === 'owner') {
+      return (
+        <select value={val||''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}>
+          <option value="">—</option>
+          {people.map(p => {
+            const label = p.name || `{${p.team} ${p.role}}`;
+            return <option key={p.id} value={label}>{label}</option>;
+          })}
+        </select>
+      );
+    }
     if (col.key === 'milestone') return <select value={val||''} onChange={e=>commit(e.target.value)} onKeyDown={onEnterKey} className={cls} autoFocus onBlur={()=>setEditCell(null)}><option value="">—</option>{milestones.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select>;
     if (col.key === 'dependency') return (
       <select

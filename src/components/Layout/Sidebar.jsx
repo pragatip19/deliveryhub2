@@ -1,11 +1,12 @@
 import { NavLink, useParams, useLocation } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Home, FileText, Calendar, ClipboardList, Users, CreditCard,
   MessageSquare, AlertTriangle, FileBox, Activity, ChevronDown,
   ChevronRight, BarChart2, TrendingUp, DollarSign, Briefcase, Zap
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabase';
 
 const NAV_ITEM = 'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition';
 const ACTIVE   = 'bg-blue-50 text-blue-700';
@@ -17,6 +18,15 @@ export default function Sidebar({ open }) {
   const { isAdmin, isLeadership } = useAuth();
   const [raidOpen, setRaidOpen] = useState(false);
   const showDeals = isAdmin() || isLeadership();
+
+  // Fetch uat_type for the current project so we can conditionally show the UAT tab
+  const [projectUatType, setProjectUatType] = useState(null);
+  useEffect(() => {
+    if (!projectId) { setProjectUatType(null); return; }
+    supabase.from('projects').select('uat_type').eq('id', projectId).single()
+      .then(({ data }) => setProjectUatType(data?.uat_type || null));
+  }, [projectId]);
+  const showUAT = projectUatType === 'mes' || projectUatType === 'logbooks';
 
   if (!open) return null;
 
@@ -68,7 +78,7 @@ export default function Sidebar({ open }) {
             <ProjectNavLink to={`/project/${projectId}/plan`}   icon={ClipboardList}>Project Plan</ProjectNavLink>
             <ProjectNavLink to={`/project/${projectId}/people`} icon={Users}>People</ProjectNavLink>
             <ProjectNavLink to={`/project/${projectId}/payments`} icon={CreditCard}>Payments</ProjectNavLink>
-            <ProjectNavLink to={`/project/${projectId}/uat`}    icon={FileBox}>UAT</ProjectNavLink>
+            {showUAT && <ProjectNavLink to={`/project/${projectId}/uat`} icon={FileBox}>UAT</ProjectNavLink>}
 
             {/* RAID expandable */}
             <button

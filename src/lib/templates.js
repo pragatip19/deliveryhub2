@@ -336,16 +336,16 @@ export const CLEEN_TASKS = [
   { milestone: 'Conduct UAT', activities: 'Share list of UAT Approvers to be Onboarded', tools: 'User Addition Excel Template', owner: 'Client CV SME', status: 'Not Started', duration: 1, dependency: 'Setup & Test UAT Server' },
   { milestone: 'Conduct UAT', activities: 'Execute UAT', tools: 'UAT Execution Guide', owner: 'Client CV SME', status: 'Not Started', duration: 4, dependency: 'Share list of UAT Approvers to be Onboarded' },
   { milestone: 'Conduct UAT', activities: 'Approve Configuration Specification', tools: '', owner: 'Client Project Manager', status: 'Not Started', duration: 1, dependency: 'Execute UAT' },
-  { milestone: 'Conduct UAT', activities: 'Approve Master Data', tools: '', owner: 'Client Project Manager', status: 'Not Started', duration: 1, dependency: 'Execute UAT' },
-  { milestone: 'Conduct UAT', activities: 'Approve UAT', tools: '', owner: 'Client UAT Approver', status: 'Not Started', duration: 1, dependency: 'Execute UAT' },
+  { milestone: 'Conduct UAT', activities: 'Approve Master Data', tools: '', owner: 'Client Project Manager', status: 'Not Started', duration: 3, dependency: 'Execute UAT' },
+  { milestone: 'Conduct UAT', activities: 'Approve UAT', tools: '', owner: 'Client UAT Approver', status: 'Not Started', duration: 2, dependency: 'Execute UAT' },
   // Share CSV Package
   { milestone: 'Share CSV Package', activities: 'Share Validation Plan', tools: 'Validation Plan', owner: 'Leucine Delivery Manager', status: 'Not Started', duration: 1, dependency: 'Conduct Kick-off call' },
-  { milestone: 'Share CSV Package', activities: 'Acknowledge Validation Plan', tools: 'Same as above', owner: 'Client CSV SME', status: 'Not Started', duration: 3, dependency: 'Share Validation Plan' },
-  { milestone: 'Share CSV Package', activities: 'Share CSV Package', tools: 'CSV Walkthrough Email', owner: 'Leucine Delivery Manager', status: 'Not Started', duration: 1, dependency: 'Conduct Kick-off call' },
+  { milestone: 'Share CSV Package', activities: 'Acknowledge Validation Plan', tools: 'Same as above', owner: 'Client CSV SME', status: 'Not Started', duration: 5, dependency: 'Share Validation Plan' },
+  { milestone: 'Share CSV Package', activities: 'Share CSV Package', tools: 'CSV Walkthrough Email', owner: 'Leucine Delivery Manager', status: 'Not Started', duration: 5, dependency: 'Conduct Kick-off call' },
   // Train Users & Admins
   { milestone: 'Train Users & Admins', activities: 'Share Draft Cleaning Validation SOP (Relevant Sections)', tools: 'Draft Cleaning Validation SOP Template', owner: 'Leucine Delivery Manager', status: 'Not Started', duration: 1, dependency: 'Share CSV Package' },
   { milestone: 'Train Users & Admins', activities: 'Share Knowledge Base (Training Videos)', tools: 'Training Session Video for End Users, Super Users, Admins', owner: 'Leucine Delivery Manager', status: 'Not Started', duration: 1, dependency: 'Share Draft Cleaning Validation SOP (Relevant Sections)' },
-  { milestone: 'Train Users & Admins', activities: 'Approve Operational SOP', tools: '', owner: 'Client Project Manager', status: 'Not Started', duration: 5, dependency: 'Share Draft Cleaning Validation SOP (Relevant Sections)' },
+  { milestone: 'Train Users & Admins', activities: 'Approve Operational SOP', tools: '', owner: 'Client Project Manager', status: 'Not Started', duration: 10, dependency: 'Share Draft Cleaning Validation SOP (Relevant Sections)' },
   { milestone: 'Train Users & Admins', activities: 'Train Users on the Operational SOP', tools: 'NA', owner: 'Client UAT Approver', status: 'Not Started', duration: 5, dependency: 'Approve Operational SOP' },
   // Go-Live on Production
   { milestone: 'Go-Live on Production', activities: 'Share draft PQ Protocol and Report', tools: 'PQ Execution Guide + Draft PQ Protocol, Report', owner: 'Leucine Delivery Manager', status: 'Not Started', duration: 1, dependency: 'Make Operational SOP effective' },
@@ -358,7 +358,7 @@ export const CLEEN_TASKS = [
   { milestone: 'Go-Live on Production', activities: 'Add Users on Production server', tools: '', owner: 'Client IT SME', status: 'Not Started', duration: 1, dependency: 'Execute & post-approve Data Migration' },
   { milestone: 'Go-Live on Production', activities: 'Execute PQ', tools: '', owner: 'Client CV SME', status: 'Not Started', duration: 1, dependency: 'Approve Operational SOP' },
   { milestone: 'Go-Live on Production', activities: 'Approve PQ Report', tools: '', owner: 'Client CV SME', status: 'Not Started', duration: 1, dependency: 'Execute PQ' },
-  { milestone: 'Go-Live on Production', activities: 'Make Operational SOP effective', tools: '', owner: 'Client Project Manager', status: 'Not Started', duration: 5, dependency: 'Train Users on the Operational SOP' },
+  { milestone: 'Go-Live on Production', activities: 'Make Operational SOP effective', tools: '', owner: 'Client Project Manager', status: 'Not Started', duration: 2, dependency: 'Train Users on the Operational SOP' },
   { milestone: 'Go-Live on Production', activities: 'Release System', tools: '', owner: 'Client Project Manager', status: 'Not Started', duration: 1, dependency: 'Make Operational SOP effective' },
   // Hypercare
   { milestone: 'Hypercare', activities: 'Setup Hypercare support calls', tools: 'Hypercare Playbook', owner: 'Leucine Delivery Manager', status: 'Not Started', duration: 1, dependency: 'Release System' },
@@ -489,17 +489,73 @@ export const LOGBOOKS_TASKS = [
 ];
 
 // ============================================================
+// CLEEN SOW TEMPLATE
+// ============================================================
+export const CLEEN_SOW_TEMPLATE = [
+  // Agreement
+  { section: 'Agreement', work_item: 'MSA', specification: 'Signed', notes: '' },
+  { section: 'Agreement', work_item: 'NDA', specification: 'Not Required', notes: 'NDA typically not required if MSA is signed' },
+  // Application
+  { section: 'Application', work_item: 'Application',          specification: 'CLEEN',                          notes: '' },
+  { section: 'Application', work_item: 'Version',              specification: 'Latest Out of box version',      notes: '' },
+  { section: 'Application', work_item: 'Go Live Requirements', specification: 'None so far',                    notes: '' },
+  // Cloud Infrastructure
+  { section: 'Cloud Infrastructure', work_item: 'Cloud Management',              specification: 'Leucine Managed',                     notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'Cloud Service',                 specification: 'Azure',                               notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'Data Region',                   specification: 'Provide Country - US / India / etc.', notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'Data Backup frequency',         specification: 'Daily',                               notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'Daily Backup at',               specification: '12AM IST / 2AM EST / etc.',           notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'Storage Account (S3)',          specification: 'AWS',                                 notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'High Availability (HA)',        specification: 'Not Required',                        notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'Disaster Recovery',             specification: 'Required',                            notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'RPO (Minutes)',                 specification: '',                                    notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'RTO (Minutes)',                 specification: '',                                    notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'Firewall',                      specification: 'Azure',                               notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'APM on Grafana (+Alerts)',      specification: 'Required',                            notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'Sentry Monitoring (+Alerts)',   specification: 'Required',                            notes: '' },
+  { section: 'Cloud Infrastructure', work_item: 'Geo-fencing',                   specification: 'Not Required',                        notes: '' },
+  // Facilities
+  { section: 'Facilities', work_item: 'Manufacturing Location 1', specification: 'Products Manufactured',        notes: '' },
+  { section: 'Facilities', work_item: 'Facility / Line Name',     specification: 'Tablets, Capsules, Eyedrops',  notes: '' },
+  // Process Configuration - Go Live
+  { section: 'Process Configuration - Go Live', work_item: 'Cleaning Validation Scripts', specification: '1', notes: '' },
+  { section: 'Process Configuration - Go Live', work_item: 'Equipment Types',             specification: '1', notes: '' },
+  { section: 'Process Configuration - Go Live', work_item: 'Product Types',               specification: '1', notes: '' },
+  // Process Configuration - Scale-up
+  { section: 'Process Configuration - Scale-up', work_item: 'Cleaning Validation Scripts', specification: '25', notes: 'Scale up Tracker' },
+  { section: 'Process Configuration - Scale-up', work_item: 'Equipment Types',             specification: '10', notes: '' },
+  // Integrations
+  { section: 'Integrations', work_item: 'SSO',  specification: 'Go Live scope', notes: '' },
+  { section: 'Integrations', work_item: 'ERP',  specification: 'Not in scope',  notes: '' },
+  { section: 'Integrations', work_item: 'LIMS', specification: 'Not in scope',  notes: '' },
+  { section: 'Integrations', work_item: 'QMS',  specification: 'Not in scope',  notes: '' },
+  // Environment
+  { section: 'Environment', work_item: 'Production', specification: 'Required',     notes: '' },
+  { section: 'Environment', work_item: 'Quality',    specification: 'Not Required', notes: '' },
+  { section: 'Environment', work_item: 'UAT',        specification: 'Required',     notes: '' },
+  // Additional Languages
+  { section: 'Additional Languages', work_item: '{Language1_Name}', specification: 'Included', notes: '' },
+  { section: 'Additional Languages', work_item: '{Language2_Name}', specification: 'Included', notes: '' },
+  // Professional Services
+  { section: 'Professional Services', work_item: 'Share CSV Package', specification: 'Included / Not applicable, already live', notes: '' },
+  { section: 'Professional Services', work_item: 'Conduct Trainings', specification: 'Provide committed training scope',         notes: '' },
+  { section: 'Professional Services', work_item: 'Hypercare Support', specification: '30 Days',                                  notes: '' },
+  // Payment Milestones
+  { section: 'Payment Milestones', work_item: 'Payment Milestones', specification: 'Add payments in the Payments Sheet', notes: 'Payments Tracker' },
+];
+
+// ============================================================
 // UPDATED getTemplateForCategory
 // ============================================================
 export function getTemplateForCategory(categoryName) {
   if (categoryName === 'CLEEN') {
-    return { milestones: CLEEN_MILESTONES, tasks: CLEEN_TASKS, hasUAT: false };
+    return { milestones: CLEEN_MILESTONES, tasks: CLEEN_TASKS, sowTemplate: CLEEN_SOW_TEMPLATE, hasUAT: false };
   }
   if (categoryName === 'Logbooks') {
-    return { milestones: LOGBOOKS_MILESTONES, tasks: LOGBOOKS_TASKS, hasUAT: true, uatType: 'logbooks' };
+    return { milestones: LOGBOOKS_MILESTONES, tasks: LOGBOOKS_TASKS, sowTemplate: SOW_TEMPLATE, hasUAT: true, uatType: 'logbooks' };
   }
   // MES, DMS, LMS, AI Agents → MES template
-  return { milestones: MES_MILESTONES, tasks: MES_TASKS, hasUAT: true, uatType: 'mes' };
+  return { milestones: MES_MILESTONES, tasks: MES_TASKS, sowTemplate: SOW_TEMPLATE, hasUAT: true, uatType: 'mes' };
 }
 
 // ============================================================

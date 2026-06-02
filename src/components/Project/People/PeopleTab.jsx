@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, MoreVertical, Trash2, Users, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getPeople, upsertPerson, deletePerson } from '../../../lib/supabase';
+import { getPeople, upsertPerson, deletePerson, updatePlanOwnerName } from '../../../lib/supabase';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useSpreadsheet } from '../../../lib/useSpreadsheet';
 import { SCell } from '../../shared/SCell';
@@ -74,6 +74,20 @@ export default function PeopleTab({ project, canEdit }) {
         setClientPeople(prev => prev.map(p => p.id === saved.id ? saved : p));
       } else {
         setLeucinePeople(prev => prev.map(p => p.id === saved.id ? saved : p));
+      }
+
+      // Auto-sync owner column in Project Plan when a person's name changes
+      if (field === 'name' && person.name && value && person.name !== value) {
+        // Build list of old name variants to catch both "{Client IT SME}" and "Client IT SME" formats
+        const oldNames = [person.name];
+        if (person.name.startsWith('{') && person.name.endsWith('}')) {
+          oldNames.push(person.name.slice(1, -1)); // strip curly braces
+        }
+        try {
+          await updatePlanOwnerName(project.id, oldNames, value);
+        } catch (syncErr) {
+          console.warn('Could not sync owner name in project plan:', syncErr);
+        }
       }
     } catch (e) {
       toast.error('Failed to save');

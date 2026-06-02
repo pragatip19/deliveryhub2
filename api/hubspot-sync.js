@@ -171,6 +171,10 @@ async function maybeCreateProject(deal, stageLabel, ownerMap, log) {
 
   const projectName = props.dealname || `Deal ${hsId}`;
 
+  // Map category → uat_type (only MES and Logbooks use the UAT tracker)
+  const uatTypeMap = { MES: 'mes', Logbooks: 'logbooks' };
+  const uatType = uatTypeMap[categoryName] || null;
+
   const [newProject] = await sbPost('projects?select=id', {
     name:            projectName,
     deal_stage:      stageLabel,
@@ -180,6 +184,7 @@ async function maybeCreateProject(deal, stageLabel, ownerMap, log) {
     po_date:         props.po_date   || null,
     planned_go_live: null,
     dm_id:           dmId,
+    uat_type:        uatType,
     created_at:      new Date().toISOString(),
   }, 'return=representation');
 
@@ -211,6 +216,37 @@ async function maybeCreateProject(deal, stageLabel, ownerMap, log) {
 
   await sbPost('project_plan', planRows, 'return=minimal');
   log.push(`  Deal ${hsId}: created ${planRows.length} plan tasks (${categoryName})`);
+
+  // Insert UAT template rows for MES and Logbooks projects
+  if (uatType) {
+    const MES_UAT_GROUPS = [
+      { group: 'BMR',                  count: 6 },
+      { group: 'BPR',                  count: 6 },
+      { group: 'Logbooks / Processes', count: 5 },
+    ];
+    const LOG_UAT_GROUPS = [
+      { group: 'Logbooks / Processes', count: 5 },
+    ];
+    const uatGroups = uatType === 'mes' ? MES_UAT_GROUPS : LOG_UAT_GROUPS;
+    const uatRows = [];
+    let sortOrder = 0;
+    for (const { group, count } of uatGroups) {
+      for (let i = 1; i <= count; i++) {
+        uatRows.push({
+          project_id:    newProject.id,
+          group_name:    group,
+          process_name:  `{Stage ${i} Name}`,
+          status:        'Not Started',
+          batch_1_status: uatType === 'mes' ? 'Not Started' : null,
+          batch_2_status: uatType === 'mes' ? 'Not Started' : null,
+          batch_3_status: uatType === 'mes' ? 'Not Started' : null,
+          sort_order:    sortOrder++,
+        });
+      }
+    }
+    await sbPost('uat_items', uatRows, 'return=minimal');
+    log.push(`  Deal ${hsId}: created ${uatRows.length} UAT template rows (${uatType})`);
+  }
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────

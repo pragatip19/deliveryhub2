@@ -357,6 +357,18 @@ export async function clearPlanTasks(projectId) {
   if (error) throw error;
 }
 
+// Update every project_plan row whose owner matches any of oldNames → newName
+// Used to auto-sync when a person's name is changed in the People tab.
+// oldNames is an array to handle both "{Client IT SME}" and "Client IT SME" formats.
+export async function updatePlanOwnerName(projectId, oldNames, newName) {
+  const { error } = await supabase
+    .from('project_plan')
+    .update({ owner: newName })
+    .eq('project_id', projectId)
+    .in('owner', oldNames);
+  if (error) throw error;
+}
+
 // ============================================================
 // SOW
 // ============================================================
@@ -565,6 +577,20 @@ export async function upsertUATItem(projectIdOrObj, item) {
 export async function deleteUATItem(id) {
   const { error } = await supabase.from('uat_items').delete().eq('id', id);
   if (error) throw error;
+}
+
+// Bulk-clear all UAT items for a project (used by Load Template to ensure idempotency)
+export async function clearUATItems(projectId) {
+  const { error } = await supabase.from('uat_items').delete().eq('project_id', projectId);
+  if (error) throw error;
+}
+
+// Bulk-insert UAT items (used by Load Template)
+export async function bulkUpsertUATItems(items) {
+  if (!items?.length) return [];
+  const { data, error } = await supabase.from('uat_items').upsert(items).select();
+  if (error) throw error;
+  return data || [];
 }
 
 // ============================================================

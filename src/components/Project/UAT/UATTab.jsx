@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Plus, MoreVertical, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getUATItems, upsertUATItem, deleteUATItem, getPeople } from '../../../lib/supabase';
+import { getUATItems, upsertUATItem, deleteUATItem, clearUATItems, bulkUpsertUATItems, getPeople } from '../../../lib/supabase';
+import { MES_UAT_TEMPLATE, LOGBOOKS_UAT_TEMPLATE } from '../../../lib/templates';
 import { UAT_STATUS_OPTIONS, UAT_BATCH_STATUS_OPTIONS } from '../../../lib/templates';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useSpreadsheet } from '../../../lib/useSpreadsheet';
@@ -33,7 +34,7 @@ const StatusPill = ({ value, colorMap }) => {
 const MES_GROUPS = ['BMR', 'BPR', 'Logbooks / Processes'];
 const LOG_GROUPS = ['Logbooks / Processes'];
 
-const EDIT_COLS_MES = ['process', 'status', 'approver', 'batch1', 'batch2', 'batch3', 'paper', 'elim', 'auto', 'ctrl', 'rem', 'inter', 'comp'];
+const EDIT_COLS_MES = ['process', 'status', 'approver', 'batch1_status', 'batch1_start', 'batch1_end', 'batch2_status', 'batch2_start', 'batch2_end', 'batch3_status', 'batch3_start', 'batch3_end', 'paper', 'elim', 'auto', 'ctrl', 'rem', 'inter', 'comp'];
 const EDIT_COLS_LOG = ['process', 'status', 'approver', 'paper', 'elim', 'auto', 'ctrl', 'rem', 'inter', 'comp'];
 
 export default function UATTab({ project, canEdit }) {
@@ -52,19 +53,25 @@ export default function UATTab({ project, canEdit }) {
 
   const ss = useSpreadsheet();
 
-  // Global batch dates
+  // Global batch + PQ dates (stored in __batch_config row)
   const [batchDates, setBatchDates] = useState({
     batch_1_start: '', batch_1_end: '',
     batch_2_start: '', batch_2_end: '',
     batch_3_start: '', batch_3_end: '',
+    pq_start: '', pq_end: '',
   });
   const [batchCfgId, setBatchCfgId] = useState(null);
+  const [loadingTemplate, setLoadingTemplate] = useState(false);
 
   // ── Column widths (resizable) ────────────────────────────────────────────────
   const COL_LS_KEY = `uatCols_${project?.id}`;
   const DEFAULT_COLS = {
     actions: 32, process: 180, status: 130, approver: 130,
-    batch1: 100, batch2: 100, batch3: 100,
+    // Each batch: status + start date + end date
+    batch1_status: 100, batch1_start: 110, batch1_end: 110,
+    batch2_status: 100, batch2_start: 110, batch2_end: 110,
+    batch3_status: 100, batch3_start: 110, batch3_end: 110,
+    pq_start: 110, pq_end: 110,
     paper: 80, elim: 80, auto: 80, ctrl: 80, rem: 80, inter: 80, comp: 90,
   };
   const [colWidths, setColWidths] = useState(() => {
@@ -141,6 +148,8 @@ export default function UATTab({ project, canEdit }) {
             batch_2_end:   cfg.batch_2_end   || '',
             batch_3_start: cfg.batch_3_start || '',
             batch_3_end:   cfg.batch_3_end   || '',
+            pq_start:      cfg.pq_start      || '',
+            pq_end:        cfg.pq_end        || '',
           });
         }
       } catch { toast.error('Failed to load UAT data'); }
@@ -232,6 +241,28 @@ export default function UATTab({ project, canEdit }) {
     } catch { toast.error('Failed to delete'); }
   }, []);
 
+  // ── Load Template (idempotent: always clears first) ──────────────────────────
+  const handleLoadTemplate = useCallback(async () => {
+    if (!window.confirm(`This will replace ALL UAT rows with the default ${isMES ? 'MES' : 'Logbooks'} template. Continue?`)) return;
+    setLoadingTemplate(true);
+    try {
+      await clearUATItems(project.id);
+      const tmpl = isMES ? MES_UAT_TEMPLATE : LOGBOOKS_UAT_TEMPLATE;
+      const toInsert = tmpl.map((row, i) => ({
+        ...row,
+        project_id: project.id,
+        sort_order: i,
+      }));
+      await bulkUpsertUATItems(toInsert);
+      const fresh = await getUATItems(project.id);
+      setUatItems(fresh || []);
+      setBatchDates({ batch_1_start: '', batch_1_end: '', batch_2_start: '', batch_2_end: '', batch_3_start: '', batch_3_end: '', pq_start: '', pq_end: '' });
+      setBatchCfgId(null);
+      toast.success(`${toInsert.length} UAT rows loaded`);
+    } catch (e) { toast.error('Failed to load UAT template: ' + (e?.message || '')); }
+    finally { setLoadingTemplate(false); }
+  }, [project.id, isMES]);
+
   // ── Group rows ───────────────────────────────────────────────────────────────
   const groupedItems = useMemo(() => {
     const result = {};
@@ -262,7 +293,15 @@ export default function UATTab({ project, canEdit }) {
 
   return (
     <div className="p-6 space-y-4" onClick={() => ss.clearAll()}>
-      <h3 className="text-lg font-semibold">{isMES ? 'MES' : 'Logbooks'} UAT Tracker</h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">{isMES ? 'MES' : 'Logbooks'} UAT Tracker</h3>
+        {canEdit && (
+          <button onClick={handleLoadTemplate} disabled={loadingTemplate}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-lg border border-purple-200 transition disabled:opacity-50">
+            {loadingTemplate ? 'Loading…' : '⬇ Load Template'}
+          </button>
+        )}
+      </div>
 
       <div className="overflow-x-auto border border-gray-300 rounded-lg select-none" onClick={e => e.stopPropagation()}>
         <table className="border-collapse text-xs" style={{ minWidth: '100%' }}>
@@ -271,28 +310,30 @@ export default function UATTab({ project, canEdit }) {
             <tr className="bg-gray-200 border-b border-gray-300">
               <th className={`${superTh} w-8`} rowSpan={2} />
               <th colSpan={3} className={`${superTh} text-left`}>Configuration</th>
-              {isMES && <th colSpan={3} className={superTh}>UAT</th>}
+              {isMES && <>
+                <th colSpan={3} className={superTh}>Batch 1</th>
+                <th colSpan={3} className={superTh}>Batch 2</th>
+                <th colSpan={3} className={superTh}>Batch 3</th>
+                <th colSpan={2} className={superTh}>PQ</th>
+              </>}
               <th colSpan={7} className={superTh}>Case Study</th>
             </tr>
 
             {/* ── Column headers ── */}
             <tr className="bg-gray-100 border-b border-gray-300">
-              <th className={thCls} style={cw('process')}>
-                Process Name
-                <ResizeHandle colKey="process" />
-              </th>
-              <th className={thCls} style={cw('status')}>
-                Status
-                <ResizeHandle colKey="status" />
-              </th>
-              <th className={thCls} style={cw('approver')}>
-                UAT Approver
-                <ResizeHandle colKey="approver" />
-              </th>
+              <th className={thCls} style={cw('process')}>Process Name<ResizeHandle colKey="process" /></th>
+              <th className={thCls} style={cw('status')}>Status<ResizeHandle colKey="status" /></th>
+              <th className={thCls} style={cw('approver')}>UAT Approver<ResizeHandle colKey="approver" /></th>
               {isMES && <>
-                <th className={thCls} style={cw('batch1')}>Batch 1<ResizeHandle colKey="batch1" /></th>
-                <th className={thCls} style={cw('batch2')}>Batch 2<ResizeHandle colKey="batch2" /></th>
-                <th className={thCls} style={cw('batch3')}>Batch 3<ResizeHandle colKey="batch3" /></th>
+                {[1,2,3].map(n => (
+                  <React.Fragment key={n}>
+                    <th className={thCls} style={cw(`batch${n}_status`)}>Status<ResizeHandle colKey={`batch${n}_status`} /></th>
+                    <th className={thCls} style={cw(`batch${n}_start`)}>Start Date<ResizeHandle colKey={`batch${n}_start`} /></th>
+                    <th className={thCls} style={cw(`batch${n}_end`)}>End Date<ResizeHandle colKey={`batch${n}_end`} /></th>
+                  </React.Fragment>
+                ))}
+                <th className={thCls} style={cw('pq_start')}>PQ Start<ResizeHandle colKey="pq_start" /></th>
+                <th className={thCls} style={cw('pq_end')}>PQ End<ResizeHandle colKey="pq_end" /></th>
               </>}
               {[
                 ['paper',  'Paper Fields'],
@@ -303,37 +344,54 @@ export default function UATTab({ project, canEdit }) {
                 ['inter',  'Interlocks'],
                 ['comp',   'Compliance Score'],
               ].map(([k, label]) => (
-                <th key={k} className={thCls} style={cw(k)}>
-                  {label}
-                  <ResizeHandle colKey={k} />
-                </th>
+                <th key={k} className={thCls} style={cw(k)}>{label}<ResizeHandle colKey={k} /></th>
               ))}
             </tr>
 
-            {/* ── Batch date rows (MES only) ── */}
+            {/* ── Global batch + PQ date rows (MES only) ── */}
             {isMES && <>
               <tr className="bg-blue-50 border-b border-gray-200">
-                <td className={`${tdCls} text-gray-500 font-medium`} style={cw('actions')} />
-                <td className={`${tdCls} font-medium text-gray-600`} colSpan={3}>Start Date</td>
+                <td style={cw('actions')} />
+                <td className={`${tdCls} font-medium text-gray-600`} colSpan={3}>Batch Start Date</td>
                 {[1,2,3].map(n => (
-                  <td key={n} className={tdCls} style={cw(`batch${n}`)}>
-                    <input type="date" value={batchDates[`batch_${n}_start`] || ''} disabled={!canEdit}
-                      onChange={e => handleBatchDateChange(`batch_${n}_start`, e.target.value)}
-                      className="w-full px-1 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
-                  </td>
+                  <React.Fragment key={n}>
+                    <td className={tdCls} style={cw(`batch${n}_status`)} />
+                    <td className={tdCls} style={cw(`batch${n}_start`)}>
+                      <input type="date" value={batchDates[`batch_${n}_start`] || ''} disabled={!canEdit}
+                        onChange={e => handleBatchDateChange(`batch_${n}_start`, e.target.value)}
+                        className="w-full px-1 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
+                    </td>
+                    <td className={tdCls} style={cw(`batch${n}_end`)} />
+                  </React.Fragment>
                 ))}
+                <td className={tdCls} style={cw('pq_start')}>
+                  <input type="date" value={batchDates.pq_start || ''} disabled={!canEdit}
+                    onChange={e => handleBatchDateChange('pq_start', e.target.value)}
+                    className="w-full px-1 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
+                </td>
+                <td className={tdCls} style={cw('pq_end')} />
                 <td colSpan={7} />
               </tr>
               <tr className="bg-blue-50 border-b border-gray-300">
-                <td className={tdCls} style={cw('actions')} />
-                <td className={`${tdCls} font-medium text-gray-600`} colSpan={3}>End Date</td>
+                <td style={cw('actions')} />
+                <td className={`${tdCls} font-medium text-gray-600`} colSpan={3}>Batch End Date</td>
                 {[1,2,3].map(n => (
-                  <td key={n} className={tdCls} style={cw(`batch${n}`)}>
-                    <input type="date" value={batchDates[`batch_${n}_end`] || ''} disabled={!canEdit}
-                      onChange={e => handleBatchDateChange(`batch_${n}_end`, e.target.value)}
-                      className="w-full px-1 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
-                  </td>
+                  <React.Fragment key={n}>
+                    <td className={tdCls} style={cw(`batch${n}_status`)} />
+                    <td className={tdCls} style={cw(`batch${n}_start`)} />
+                    <td className={tdCls} style={cw(`batch${n}_end`)}>
+                      <input type="date" value={batchDates[`batch_${n}_end`] || ''} disabled={!canEdit}
+                        onChange={e => handleBatchDateChange(`batch_${n}_end`, e.target.value)}
+                        className="w-full px-1 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
+                    </td>
+                  </React.Fragment>
                 ))}
+                <td className={tdCls} style={cw('pq_start')} />
+                <td className={tdCls} style={cw('pq_end')}>
+                  <input type="date" value={batchDates.pq_end || ''} disabled={!canEdit}
+                    onChange={e => handleBatchDateChange('pq_end', e.target.value)}
+                    className="w-full px-1 py-0.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
+                </td>
                 <td colSpan={7} />
               </tr>
             </>}
@@ -344,7 +402,7 @@ export default function UATTab({ project, canEdit }) {
               <React.Fragment key={groupName}>
                 {/* Group header */}
                 <tr className="bg-gray-100 border-b border-gray-300">
-                  <td colSpan={isMES ? 14 : 11} className="px-3 py-1.5 font-bold text-xs text-gray-800">{groupName}</td>
+                  <td colSpan={isMES ? 22 : 11} className="px-3 py-1.5 font-bold text-xs text-gray-800">{groupName}</td>
                 </tr>
 
                 {/* Data rows */}
@@ -410,16 +468,42 @@ export default function UATTab({ project, canEdit }) {
                       )}
                     </td>
 
-                    {/* Batch statuses (MES only) */}
+                    {/* Batch status + start + end (MES only, 3 cols per batch) */}
                     {isMES && [1,2,3].map(n => (
-                      <SCell key={n} ss={ss} rowId={item.id} colKey={`batch${n}`}
-                        value={item[`batch_${n}_status`] || ''}
-                        onChange={v => handleChange(item.id, `batch_${n}_status`, v)}
-                        rows={visibleItems} cols={editCols}
-                        type="colored-select" options={UAT_BATCH_STATUS_OPTIONS} colorMap={BATCH_STATUS_COLORS}
-                        disabled={!canEdit} tdStyle={cw(`batch${n}`)}
-                        readView={<StatusPill value={item[`batch_${n}_status`]} colorMap={BATCH_STATUS_COLORS} />} />
+                      <React.Fragment key={n}>
+                        <SCell ss={ss} rowId={item.id} colKey={`batch${n}_status`}
+                          value={item[`batch_${n}_status`] || ''}
+                          onChange={v => handleChange(item.id, `batch_${n}_status`, v)}
+                          rows={visibleItems} cols={editCols}
+                          type="colored-select" options={UAT_BATCH_STATUS_OPTIONS} colorMap={BATCH_STATUS_COLORS}
+                          disabled={!canEdit} tdStyle={cw(`batch${n}_status`)}
+                          readView={<StatusPill value={item[`batch_${n}_status`]} colorMap={BATCH_STATUS_COLORS} />} />
+                        <td className={tdCls} style={cw(`batch${n}_start`)}>
+                          <input type="date" value={item[`batch_${n}_start`] || ''} disabled={!canEdit}
+                            onChange={e => handleChange(item.id, `batch_${n}_start`, e.target.value)}
+                            className="w-full px-1 py-0.5 border border-transparent rounded text-xs hover:border-gray-300 focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
+                        </td>
+                        <td className={tdCls} style={cw(`batch${n}_end`)}>
+                          <input type="date" value={item[`batch_${n}_end`] || ''} disabled={!canEdit}
+                            onChange={e => handleChange(item.id, `batch_${n}_end`, e.target.value)}
+                            className="w-full px-1 py-0.5 border border-transparent rounded text-xs hover:border-gray-300 focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
+                        </td>
+                      </React.Fragment>
                     ))}
+
+                    {/* PQ Start / End (MES only) */}
+                    {isMES && <>
+                      <td className={tdCls} style={cw('pq_start')}>
+                        <input type="date" value={item.pq_start || ''} disabled={!canEdit}
+                          onChange={e => handleChange(item.id, 'pq_start', e.target.value)}
+                          className="w-full px-1 py-0.5 border border-transparent rounded text-xs hover:border-gray-300 focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
+                      </td>
+                      <td className={tdCls} style={cw('pq_end')}>
+                        <input type="date" value={item.pq_end || ''} disabled={!canEdit}
+                          onChange={e => handleChange(item.id, 'pq_end', e.target.value)}
+                          className="w-full px-1 py-0.5 border border-transparent rounded text-xs hover:border-gray-300 focus:outline-none focus:border-blue-400 disabled:bg-transparent" />
+                      </td>
+                    </>}
 
                     {/* Numeric fields */}
                     {[
@@ -455,7 +539,7 @@ export default function UATTab({ project, canEdit }) {
                 {/* Add Row */}
                 {canEdit && (
                   <tr className="bg-gray-50 border-b">
-                    <td colSpan={isMES ? 14 : 11} className="px-3 py-1.5">
+                    <td colSpan={isMES ? 22 : 11} className="px-3 py-1.5">
                       <button onClick={() => handleAddRow(groupName)}
                         className="flex items-center gap-1.5 text-blue-600 hover:text-blue-800 text-xs font-medium">
                         <Plus size={13} /> Add Row
