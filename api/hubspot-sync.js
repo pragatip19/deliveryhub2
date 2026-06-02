@@ -17,12 +17,18 @@ const TARGET_STAGE_LABELS = [
 ];
 
 const PRODUCT_TO_CATEGORY = {
+  // Actual HubSpot product values
+  'Logbooks':        'Logbooks',
+  'Batch Execution': 'MES',
+  'CLEEN':           'CLEEN',
+  'LMS':             'LMS',
+  'DMS':             'DMS',
+  'Celestara':       'AI Agents',
+  // Legacy values (kept for safety)
   'MES/Logbooks':      'Logbooks',
   'MES/Batch Records': 'MES',
-  'CLEEN':             'CLEEN',
   'OS/Learning':       'LMS',
   'OS/Documents':      'DMS',
-  'Celestara':         'AI Agents',
 };
 
 // ── HubSpot helpers ──────────────────────────────────────────────────────────
